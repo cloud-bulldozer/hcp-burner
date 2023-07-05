@@ -1,0 +1,101 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+Module to set connection to ElasticSearch and functions to upload documents
+"""
+import argparse
+import sys
+from elasticsearch import Elasticsearch as ES
+from elasticsearch.exceptions import NotFoundError
+from urllib3.util import Retry
+
+
+class Elasticsearch:
+    """ES Class"""
+
+    def __init__(self, logging, url, index, insecure, retries):
+
+        self.logging = logging
+        self.index = index
+
+        retry_on_timeout = True
+        retry_strategy = Retry(total=retries, backoff_factor=0.1)
+        retry_params = {
+            "retry_on_timeout": retry_on_timeout,
+            "retry": retry_strategy,
+        }
+
+        self.logging.info("Initializing Elasticsearch Connector...")
+        if url.startswith("https://"):
+            self.logging.debug("Setting Elasticsearch Connector with SSL...")
+            import ssl
+
+            ssl_ctx = ssl.create_default_context()
+            if insecure:
+                self.logging.debug(
+                    "Setting Elasticsearch Connector with SSL unverified..."
+                )
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
+            self.elastic = ES(url, ssl_context=ssl_ctx, verify_certs=False, **retry_params)
+        elif url.startswith("http://"):
+            self.elastic = ES(url, **retry_params)
+        else:
+            self.logging.error(
+                f"Failed to initialize Elasticsearch with url {url}. It must start with http(s)://"
+            )
+            sys.exit("Exiting...")
+        self.logging.debug("Testing Elasticsearch connection")
+        if self.elastic.ping():
+            self.logging.debug("Version: " + self.elastic.info()["version"]["number"])
+            if not self._check_index():
+                self.logging.error(f"ES index {index} do not exists")
+                sys.exit("Exiting...")
+
+    def _check_index(self):
+        try:
+            return self.elastic.indices.exists(index=self.index)
+        except NotFoundError:
+            return False
+
+    def index_metadata(self, metadata):
+        self.logging.debug(f"Indexing data on {self.elastic.transport.hosts[0]}/{self.index}")
+        self.logging.debug(metadata)
+        try:
+            self.elastic.index(index=self.index, body=metadata)
+        except Exception as err:
+            self.logging.error(err)
+            self.logging.error(
+                f"Failed to index data on on {self.elastic.transport.hosts[0]}/{self.elastic.info().get('index')})"
+            )
+            self.logging.error(metadata)
+
+
+class ElasticArguments:
+    def __init__(self, parser, environment):
+        EnvDefault = self.EnvDefault
+        parser.add_argument("--es-url", action=EnvDefault, env=environment, envvar="ROSA_BURNER_ES_URL", help="Elasticsearch URL", required=False)
+        parser.add_argument("--es-index", action=EnvDefault, env=environment, envvar="ROSA_BURNER_ES_INDEX", help="Elasticsearch Index", default="rosa-burner")
+        parser.add_argument("--es-index-retry", action=EnvDefault, env=environment, envvar="ROSA_BURNER_ES_INDEX_RETRY", type=int, help="Number of retries when index operation fails", default=5)
+        parser.add_argument("--es-insecure", action="store_true", help="Bypass cert verification on SSL connections")
+
+        # self.parameters = vars(parser.parse_args())
+
+    def __getitem__(self, item):
+        return self.parameters[item] if item in self.parameters else None
+
+    class EnvDefault(argparse.Action):
+        """Argument passed has preference over the envvar"""
+
+        def __init__(self, env, envvar, required=True, default=None, **kwargs):
+            if not default and envvar:
+                if envvar in env:
+                    default = env[envvar]
+            if required and default:
+                required = False
+            super(ElasticArguments.EnvDefault, self).__init__(
+                default=default, required=required, **kwargs
+            )
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            setattr(namespace, self.dest, values)

@@ -6,6 +6,8 @@ import json
 import time
 import datetime
 import subprocess
+import configparser
+import argparse
 from packaging import version as ver
 from libs.aws import AWS
 from libs.platforms.platform import Platform
@@ -20,7 +22,7 @@ class Rosa(Platform):
         aws.set_aws_envvars(arguments['aws_profile'], arguments['aws_region'])
         self.environment['aws'] = aws.set_aws_environment(arguments['aws_profile'], arguments['aws_region'])
         self.environment["commands"].append("rosa")
-        self.environment["commands"].append("aws")
+        # self.environment["commands"].append("aws")
 
         self.environment["rosa_env"] = arguments["rosa_env"]
 
@@ -420,103 +422,39 @@ class Rosa(Platform):
 
 
 class RosaArguments(PlatformArguments):
-    def __init__(self, parser, environment):
-        super().__init__(parser, environment)
+    def __init__(self, parser, config_file, environment):
+        super().__init__(parser, config_file, environment)
         EnvDefault = self.EnvDefault
 
-        parser.add_argument(
-            "--rosa-env",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_ROSA_ENV",
-            help="ROSA Environment",
-            required=False,
-        )
+        parser.add_argument("--rosa-env", action=EnvDefault, env=environment, default='staging', envvar="ROSA_BURNER_ROSA_ENV", help="ROSA Environment")
+        parser.add_argument("--aws-account-file", action=EnvDefault, env=environment, envvar="ROSA_BURNER_AWS_ACCOUNT_FILE", help="File containing the AWS credentials")
+        parser.add_argument("--aws-profile", action=EnvDefault, env=environment, envvar="ROSA_BURNER_AWS_PROFILE", help="Profile to use if aws file cointains more than one")
+        parser.add_argument("--aws-region", action=EnvDefault, env=environment, envvar="ROSA_BURNER_AWS_REGION", default='us-east-2', help="Token to access OCM API")
+        parser.add_argument("--oidc-config-id", action=EnvDefault, env=environment, envvar="ROSA_BURNER_OIDC_CONFIG_ID", help="OIDC Config ID to be used on all the clusters")
+        parser.add_argument("--common-operator-roles", action="store_true", help="Create one set of operator roles and use it on all clusters")
+        parser.add_argument("--extra-machinepool-name", action=EnvDefault, env=environment, envvar="ROSA_BURNER_MACHINE_POOL_NAME", help="Add an extra machinepool with this name after cluster is installed")
+        parser.add_argument("--extra-machinepool-machine-type", action=EnvDefault, env=environment, envvar="ROSA_BURNER_MACHINE_POOL_MACHINE_TYPE", help="Machine Type of the nodes of the extra machinepool", default="m5.xlarge")
+        parser.add_argument("--extra-machinepool-replicas", action=EnvDefault, env=environment, envvar="ROSA_BURNER_MACHINE_POOL_REPLICAS", help="Number of replicas of the extra machinepool", type=int, default=3)
+        parser.add_argument("--extra-machinepool-labels", action=EnvDefault, env=environment, envvar="ROSA_BURNER_MACHINEPOOL_LABELS", type=str, help="Labels to add on the extra machinepool", default=None)
+        parser.add_argument("--extra-machinepool-taints", action=EnvDefault, env=environment, envvar="ROSA_BURNER_MACHINEPOOL_TAINTS", type=str, help="Taints to add on the extra machinepool", default=None)
 
-        parser.add_argument(
-            "--aws-account-file",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_AWS_ACCOUNT_FILE",
-            help="Token to access OCM API",
-            required=True,
-        )
-        parser.add_argument(
-            "--aws-profile",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_AWS_PROFILE",
-            help="Token to access OCM API",
-            required=False,
-        )
-        parser.add_argument(
-            "--aws-region",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_AWS_REGION",
-            help="Token to access OCM API",
-            required=True,
-        )
+        if config_file:
+            config = configparser.ConfigParser()
+            config.read(config_file)
+            defaults = {}
+            defaults.update(dict(config.items("Platform:Rosa")))
+            parser.set_defaults(**defaults)
 
-        parser.add_argument(
-            "--oidc-config-id",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_OIDC_CONFIG_ID",
-            help="OIDC Config ID to be used on all the clusters",
-            required=False,
-        )
-        parser.add_argument(
-            "--common-operator-roles",
-            action="store_true",
-            help="Create one set of operator roles and use it on all HCs",
-            required=False,
-        )
+        temp_args, temp_unknown_args = parser.parse_known_args()
+        if not temp_args.aws_account_file:
+            parser.error("rosa-burner.py: error: the following arguments (or equivalent definition) are required: --aws-account-file")
 
-        parser.add_argument(
-            "--extra-machinepool-name",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_MACHINE_POOL_NAME",
-            help="Add an extra machinepool with this name after cluster is installed",
-            required=False,
-        )
-        parser.add_argument(
-            "--extra-machinepool-machine-type",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_MACHINE_POOL_MACHINE_TYPE",
-            help="Machine Type of the nodes of the extra machinepool",
-            default="m5.xlarge",
-            required=False,
-        )
-        parser.add_argument(
-            "--extra-machinepool-replicas",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_MACHINE_POOL_REPLICAS",
-            help="Number of replicas of the extra machinepool",
-            type=int,
-            default=3,
-            required=False,
-        )
-        parser.add_argument(
-            "--extra-machinepool-labels",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_MACHINEPOOL_LABELS",
-            type=str,
-            help="Labels to add on the extra machinepool",
-            default=None,
-            required=False,
-        )
-        parser.add_argument(
-            "--extra-achinepool-taints",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_MACHINEPOOL_TAINTS",
-            type=str,
-            help="Taints to add on the extra machinepool",
-            default=None,
-            required=False,
-        )
+    class EnvDefault(argparse.Action):
+        def __init__(self, env, envvar, default=None, **kwargs):
+            default = env[envvar] if envvar in env else default
+            super(RosaArguments.EnvDefault, self).__init__(
+                default=default, **kwargs
+            )
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            setattr(namespace, self.dest, values)

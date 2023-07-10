@@ -1,0 +1,25 @@
+# builders.yml
+name: Install pip requirements
+on:
+  workflow_call:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 1
+        ref: ${{ github.event.pull_request.head.sha }}
+        persist-credentials: false
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+
+    - name: Install pip
+      run: python -m pip install --upgrade pip
+
+    - name: Install requirements
+      run: find . -name 'requirements.txt' -exec pip install -r {} \;

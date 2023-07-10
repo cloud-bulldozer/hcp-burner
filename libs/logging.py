@@ -3,6 +3,7 @@
 import os
 import logging
 import argparse
+import configparser
 
 
 class Logging(logging.getLoggerClass()):
@@ -15,9 +16,7 @@ class Logging(logging.getLoggerClass()):
         self.filters = []
         self.handlers = []
         self.setLevel(loglevel.upper())
-        self.log_format = (
-            "%(asctime)s %(levelname)s %(module)s - %(funcName)s: %(message)s"
-        )
+        self.log_format = "%(asctime)s %(levelname)s %(module)s - %(funcName)s: %(message)s"
         consolelog = logging.StreamHandler()
         consolelog.setFormatter(CustomFormatter(self.log_format))
         self.addHandler(consolelog)
@@ -65,35 +64,28 @@ class CustomFormatter(logging.Formatter):
 
 
 class LoggingArguments:
-    def __init__(self, parser, environment):
+    def __init__(self, parser, config_file, environment):
         EnvDefault = self.EnvDefault
-        parser.add_argument(
-            "--log-level",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_LOG_LEVEL",
-            default="INFO",
-        )
-        parser.add_argument(
-            "--log-file",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_LOG_FILE",
-            required=False,
-        )
+        parser.add_argument("--log-level", action=EnvDefault, env=environment, envvar="ROSA_BURNER_LOG_LEVEL", default="INFO")
+        parser.add_argument("--log-file",  action=EnvDefault, env=environment, envvar="ROSA_BURNER_LOG_FILE")
 
-    def __getitem__(self, item):
-        return self.parameters[item] if item in self.parameters else None
+        args, unknown_args = parser.parse_known_args()
+
+        if config_file:
+            config = configparser.ConfigParser()
+            config.read(config_file)
+            defaults = {}
+            defaults.update(dict(config.items("Logging")))
+            parser.set_defaults(**defaults)
+
+    # def __getitem__(self, item):
+    #     return self.parameters[item] if item in self.parameters else None
 
     class EnvDefault(argparse.Action):
-        def __init__(self, env, envvar, required=True, default=None, **kwargs):
-            if not default and envvar:
-                if envvar in env:
-                    default = env[envvar]
-            if required and default:
-                required = False
+        def __init__(self, env, envvar, default=None, **kwargs):
+            default = env[envvar] if envvar in env else default
             super(LoggingArguments.EnvDefault, self).__init__(
-                default=default, required=required, **kwargs
+                default=default, **kwargs
             )
 
         def __call__(self, parser, namespace, values, option_string=None):

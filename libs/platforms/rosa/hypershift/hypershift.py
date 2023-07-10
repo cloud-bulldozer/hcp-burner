@@ -8,6 +8,7 @@ import datetime
 import math
 import shutil
 import concurrent.futures
+import configparser
 
 from libs.platforms.rosa.rosa import Rosa
 from libs.platforms.rosa.rosa import RosaArguments
@@ -20,20 +21,16 @@ class Hypershift(Rosa):
         self.environment["service_cluster"] = arguments["service_cluster"]
 
         self.environment["create_vpcs"] = arguments["create_vpcs"]
-        if arguments["create_vpcs"]:
+        if str(arguments["create_vpcs"]).lower() == "true":
             self.environment["commands"].append("terraform")
             self.environment["clusters_per_vpc"] = arguments["clusters_per_vpc"]
             self.environment["terraform_retry"] = arguments["terraform_retry"]
         else:
-            if (
-                arguments["wildcard_options"]
-                and "--subnets-ids" not in arguments["wildcard_options"]
-                or not arguments["wildcard_options"]
-            ):
-                self.logging.error(
-                    "Cluster creation will fail. No subnets are provided and no --create-vpcs command is selected"
-                )
+            if (arguments["wildcard_options"] and "--subnets-ids" not in arguments["wildcard_options"] or not arguments["wildcard_options"]):
+                self.logging.error("Cluster creation will fail. No subnets are provided and no --create-vpcs command is selected")
                 sys.exit("Exiting...")
+            else:
+                self.logging.info(f"No VPC will be created, using {arguments['wildcard_options']}")
 
     def initialize(self):
         super().initialize()
@@ -44,19 +41,11 @@ class Hypershift(Rosa):
                 f"Verifying Provision Shard for Service Cluster: {self.environment['service_cluster']}"
             )
             self.environment["shard_id"] = self._verify_provision_shard()
-            sys.exit("Exiting...") if self.environment[
-                "shard_id"
-            ] is None else self.logging.info(
-                f"Found provision shard {self.environment['shard_id']} for Service Cluster {self.environment['service_cluster']}"
-            )
-            self.environment["sc_kubeconfig"] = self.download_kubeconfig(
-                self.environment["service_cluster"], self.environment["path"]
-            )
+            sys.exit("Exiting...") if self.environment["shard_id"] is None else self.logging.info(f"Found provision shard {self.environment['shard_id']} for Service Cluster {self.environment['service_cluster']}")
+            self.environment["sc_kubeconfig"] = self.download_kubeconfig(self.environment["service_cluster"], self.environment["path"])
 
         # Set OIDC Config
-        sys.exit("Exiting") if not self._set_oidc_config() else self.logging.info(
-            f"Using {self.environment['oidc_config_id']} as OIDC config ID"
-        )
+        sys.exit("Exiting") if not self._set_oidc_config() else self.logging.info(f"Using {self.environment['oidc_config_id']} as OIDC config ID")
 
         # Set Operator Roles
         if self.environment["common_operator_roles"]:
@@ -84,7 +73,7 @@ class Hypershift(Rosa):
                 self.logging.error(
                     "Failed to create AWS VPCs, jumping to cleanup and exiting..."
                 )
-                self.cleanup()
+                self.platform_cleanup()
                 sys.exit("Exiting")
             else:
                 self.logging.info(f"Created {len(self.environment['vpcs'])} AWS VPCs")
@@ -438,7 +427,7 @@ class Hypershift(Rosa):
             cluster_info["vpc"] = platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])]
             cluster_cmd.append("--subnet-ids")
             cluster_cmd.append(cluster_info["vpc"][1])
-        if platform.environment["shard_id"]:
+        if "shard_id" in platform.environment:
             cluster_cmd.append("--properties")
             cluster_cmd.append("provision_shard_id:" + platform.environment["shard_id"])
         if platform.environment["wildcard_options"]:
@@ -510,13 +499,13 @@ class Hypershift(Rosa):
                 cluster_info["workers_wait_time"] = None
                 cluster_info["status"] = "Ready. Not Access"
                 return 1
-            if platform.environment["extra_machinepool"]:
+            if "extra_machinepool" in platform.environment:
                 extra_machine_pool_start_time = int(time.time())
                 self.add_machinepool(cluster_name, cluster_info["metadata"]["cluster_id"], cluster_info["metadata"]["zones"], platform.environment["extra_machinepool"])
             if cluster_info["workers_wait_time"]:
                 with concurrent.futures.ThreadPoolExecutor() as wait_executor:
                     futures = [wait_executor.submit(self._wait_for_workers, cluster_info["kubeconfig"], cluster_info["workers"], cluster_info["workers_wait_time"], cluster_name, "workers")]
-                    futures.append(wait_executor.submit(self._wait_for_workers, cluster_info["kubeconfig"], platform.environment["extra_machinepool"]["replicas"], cluster_info["workers_wait_time"], cluster_name, platform.environment["extra_machinepool"]["name"])) if platform.environment["extra_machinepool"] else None
+                    futures.append(wait_executor.submit(self._wait_for_workers, cluster_info["kubeconfig"], platform.environment["extra_machinepool"]["replicas"], cluster_info["workers_wait_time"], cluster_name, platform.environment["extra_machinepool"]["name"])) if "extra_machinepool" in platform.environment else None
                     for future in concurrent.futures.as_completed(futures):
                         result = future.result()
                         if result[0] == "workers":
@@ -529,7 +518,7 @@ class Hypershift(Rosa):
                                 return 1
                         else:
                             extra_pool_workers = int(result[1])
-                            if platform.environment["extra_machinepool"] and extra_pool_workers == platform.environment["extra_machinepool"]["replicas"]:
+                            if "extra_machinepool" in platform.environment and extra_pool_workers == platform.environment["extra_machinepool"]["replicas"]:
                                 cluster_info["extra_pool_workers_ready"] = result[2] - extra_machine_pool_start_time
                             else:
                                 cluster_info["extra_pool_workers_ready"] = None
@@ -626,38 +615,18 @@ class Hypershift(Rosa):
 
 
 class HypershiftArguments(RosaArguments):
-    def __init__(self, parser, environment):
-        super().__init__(parser, environment)
+    def __init__(self, parser, config_file, environment):
+        super().__init__(parser, config_file, environment)
         EnvDefault = self.EnvDefault
 
-        parser.add_argument(
-            "--create-vpcs",
-            action="store_true",
-            help="Create a VPC for each Hosted Cluster",
-            required=False,
-        )
-        parser.add_argument(
-            "--clusters-per-vpc",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_CLUSTERS_PER_VPC",
-            help="Number of HC to create on each VPC",
-            type=int,
-            default=1,
-            choices=range(1, 11),
-        )
-        parser.add_argument(
-            "--terraform-retry",
-            type=int,
-            default=5,
-            help="Number of retries when executing terraform commands",
-        )
+        parser.add_argument("--create-vpcs", action="store_true", help="Create a VPC for each Hosted Cluster")
+        parser.add_argument("--clusters-per-vpc", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTERS_PER_VPC", help="Number of HC to create on each VPC", type=int, default=1, choices=range(1, 11))
+        parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
+        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
 
-        parser.add_argument(
-            "--service-cluster",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER",
-            help="Service Cluster Used to create the Hosted Clusters",
-            required=False,
-        )
+        if config_file:
+            config = configparser.ConfigParser()
+            config.read(config_file)
+            defaults = {}
+            defaults.update(dict(config.items("Platform:Rosa:Hypershift")))
+            parser.set_defaults(**defaults)

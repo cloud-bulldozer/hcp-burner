@@ -15,6 +15,7 @@ class AWS:
     def __init__(self, logging, account_file, profile):
         if os.path.exists(account_file):
             self.logging = logging
+            self.config_file = account_file
             logging.info("AWS account file found. Loading account information")
             self.aws_config = configparser.RawConfigParser()
             self.aws_config.read(account_file)
@@ -45,6 +46,7 @@ class AWS:
         os.environ["AWS_REGION"] = aws_region
         os.environ["AWS_ACCESS_KEY_ID"] = self.aws_config[profile]["aws_access_key_id"]
         os.environ["AWS_SECRET_ACCESS_KEY"] = self.aws_config[profile]["aws_secret_access_key"]
+        os.environ["AWS_SHARED_CREDENTIALS_FILE"] = self.config_file
 
     def set_aws_environment(self, profile, aws_region):
         """ Get AWS information from the account_file and save it on the environment object"""

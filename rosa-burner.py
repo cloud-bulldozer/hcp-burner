@@ -19,29 +19,14 @@ if __name__ == "__main__":
     logging.info(f"Detected {arguments['platform']} as platform")
     try:
         if arguments["subplatform"]:
-            logging.info(
-                f"Detected {arguments['subplatform']} as subplatform, loading its module..."
-            )
-            platform_module_path = (
-                "libs.platforms."
-                + arguments["platform"]
-                + "."
-                + arguments["subplatform"]
-                + "."
-                + arguments["subplatform"]
-            )
+            logging.info(f"Detected {arguments['subplatform']} as subplatform, loading its module...")
+            platform_module_path = "libs.platforms." + arguments["platform"] + "." + arguments["subplatform"] + "." + arguments["subplatform"]
             platform_module = importlib.import_module(platform_module_path)
-            PlatformClass = getattr(
-                platform_module, arguments["subplatform"].capitalize()
-            )
+            PlatformClass = getattr(platform_module, arguments["subplatform"].capitalize())
             platform = PlatformClass(arguments, logging, utils)
         else:
-            logging.info(
-                f"Subplatform not detected, loading {arguments['platform']} module..."
-            )
-            platform_module_path = (
-                "libs.platforms." + arguments["platform"] + "." + arguments["platform"]
-            )
+            logging.info(f"Subplatform not detected, loading {arguments['platform']} module...")
+            platform_module_path = "libs.platforms." + arguments["platform"] + "." + arguments["platform"]
             platform_module = importlib.import_module(platform_module_path)
             PlatformClass = getattr(platform_module, arguments["platform"].capitalize())
             platform = PlatformClass(arguments, logging, utils)
@@ -54,9 +39,7 @@ if __name__ == "__main__":
         logging.error(err)
         sys.exit("Exiting...")
 
-    logging.info(
-        f"Verifying external binaries required by the {arguments['platform']} platform"
-    )
+    logging.info(f"Verifying external binaries required by the {arguments['platform']} platform")
     for command in platform.environment["commands"]:
         utils.verify_cmnd(command)
 
@@ -66,7 +49,7 @@ if __name__ == "__main__":
     watcher.daemon = True
     watcher.start()
 
-    install_threads = utils._install_scheduler(platform)
+    install_threads = utils.install_scheduler(platform)
     logging.info(f"{len(install_threads)} threads created for installing clusters. Waiting for them to finish")
     for thread in install_threads:
         try:
@@ -79,7 +62,7 @@ if __name__ == "__main__":
                 raise
     watcher.join()
 
-    if platform.environment['load']:
+    if str(platform.environment['load']).lower() == "true":
         # Prometheus takes a lot of time to start after all nodes are ready. we maybe needs to increase this sleep in the future
         logging.info("Waiting 5 minutes to allow all clusters to create all pods")
         time.sleep(300)
@@ -95,8 +78,8 @@ if __name__ == "__main__":
                 else:
                     raise
 
-    if platform.environment["cleanup_clusters"]:
-        delete_threads = utils._cleanup_scheduler(platform)
+    if str(platform.environment["cleanup_clusters"]).lower() == "true":
+        delete_threads = utils.cleanup_scheduler(platform)
         logging.info(f"{len(delete_threads)} threads created for deleting clusters. Waiting for them to finish")
         for thread in delete_threads:
             try:

@@ -8,6 +8,7 @@ import json
 import time
 import datetime
 import argparse
+import configparser
 
 
 class Platform:
@@ -38,6 +39,7 @@ class Platform:
         utils.create_path(self.environment["path"])
         self.logging.info("Using %s as working directory" % self.environment["path"])
 
+        self.environment["clusters"] = {}
         self.environment["cluster_count"] = arguments["cluster_count"]
         self.environment["batch_size"] = arguments["batch_size"]
         self.environment["delay_between_batch"] = arguments["delay_between_batch"]
@@ -225,38 +227,31 @@ class Platform:
 
 
 class PlatformArguments:
-    def __init__(self, parser, environment):
+    def __init__(self, parser, config_file, environment):
         EnvDefault = self.EnvDefault
 
-        parser.add_argument(
-            "--ocm-token",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_OCM_TOKEN",
-            help="Token to access OCM API",
-            required=True,
-        )
-        parser.add_argument(
-            "--ocm-url",
-            action=EnvDefault,
-            env=environment,
-            envvar="ROSA_BURNER_OCM_URL",
-            help="OCM URL",
-            default="https://api.stage.openshift.com",
-        )
+        parser.add_argument("--ocm-token", action=EnvDefault, env=environment, envvar="ROSA_BURNER_OCM_TOKEN", help="Token to access OCM API")
+        parser.add_argument("--ocm-url", action=EnvDefault, env=environment, envvar="ROSA_BURNER_OCM_URL", help="OCM URL", default="https://api.stage.openshift.com")
 
-    def __getitem__(self, item):
-        return self.parameters[item] if item in self.parameters else None
+        if config_file:
+            config = configparser.ConfigParser()
+            config.read(config_file)
+            defaults = {}
+            defaults.update(dict(config.items("Platform")))
+            parser.set_defaults(**defaults)
+
+        temp_args, temp_unknown_args = parser.parse_known_args()
+        if not temp_args.ocm_token:
+            parser.error("rosa-burner.py: error: the following arguments (or equivalent definition) are required: --ocm-token")
+
+    # def __getitem__(self, item):
+    #     return self.parameters[item] if item in self.parameters else None
 
     class EnvDefault(argparse.Action):
-        def __init__(self, env, envvar, required=True, default=None, **kwargs):
-            if not default and envvar:
-                if envvar in env:
-                    default = env[envvar]
-            if required and default:
-                required = False
+        def __init__(self, env, envvar, default=None, **kwargs):
+            default = env[envvar] if envvar in env else default
             super(PlatformArguments.EnvDefault, self).__init__(
-                default=default, required=required, **kwargs
+                default=default, **kwargs
             )
 
         def __call__(self, parser, namespace, values, option_string=None):

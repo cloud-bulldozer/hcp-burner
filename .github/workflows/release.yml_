@@ -1,0 +1,15 @@
+name: Release Workflow
+on:
+  push:
+    tags:
+      - "*" # triggers only if push new tag version
+jobs:
+  release-build:
+    uses: ./.github/workflows/gorelease.yml
+
+  image-upload:
+    uses: ./.github/workflows/image-upload.yml
+    secrets: inherit
+
+  deploy-docs:
+    uses: ./.github/workflows/docs.yml

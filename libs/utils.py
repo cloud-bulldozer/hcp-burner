@@ -18,11 +18,11 @@ class Utils:
 
     def create_path(self, path):
         try:
-            self.logging.info("Creating directory %s if it does not exist" % path)
+            self.logging.info(f"Creating directory {path} if it does not exist")
             os.makedirs(path, exist_ok=True)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                self.logging.error(e)
+        except OSError as err:
+            if err.errno != errno.EEXIST:
+                self.logging.error(err)
                 sys.exit("Exiting...")
 
     def generate_cluster_name_seed(self, seed):
@@ -30,27 +30,24 @@ class Utils:
         allowed_chars = string.ascii_lowercase + string.digits
         for char in seed:
             if char not in allowed_chars:
-                self.logging.error(
-                    "Invalid seed for cluster names: %s\n. It must contain only lowercase letters and digits."
-                    % seed
-                )
+                self.logging.error(f"Invalid seed for cluster names: {seed}\n. It must contain only lowercase letters and digits.")
                 sys.exit("Exiting...")
         random_string = "".join(random.choice(allowed_chars) for j in range(3))
         if len(seed) > 6:
-            self.logging.warning(
-                "Seed for cluster names is too long (%d), truncated to %s"
-                % (len(seed), seed[:6])
-            )
+            self.logging.warning(f"Seed for cluster names is too long ({len(seed)}), truncated to {seed[:6]}")
             cluster_name_seed = seed[:6]
         cluster_name_seed = cluster_name_seed + "-" + random_string
-        self.logging.info("Selected Cluster Name Seed: %s" % cluster_name_seed)
+        self.logging.info(f"Selected Cluster Name Seed: {cluster_name_seed}")
         return cluster_name_seed
 
     def verify_cmnd(self, command):
         (cmd_code, cmd_out, cmd_err) = self.subprocess_exec(command + " -h")
-        sys.exit("Exiting...") if cmd_code != 0 else self.logging.info(
-            f"{command} command validated with -h"
-        )
+        if cmd_code != 0:
+            self.logging(cmd_out)
+            self.logging(cmd_err)
+            sys.exit("Exiting...")
+        else:
+            self.logging.info(f"{command} command validated with -h")
 
     def subprocess_exec(self, command, output_file=None, extra_params={}, log_output=True):
         """
@@ -66,36 +63,28 @@ class Utils:
         stderr = None
         try:
             log_file = open(output_file, "w") if output_file else subprocess.PIPE
-            process = subprocess.Popen(
-                command.split(), stdout=log_file, stderr=log_file, **extra_params
-            )
+            process = subprocess.Popen(command.split(), stdout=log_file, stderr=log_file, **extra_params)
             stdout, stderr = process.communicate()
             if process.returncode != 0 and log_output:
                 self.logging.error(f"Failed to execute command: {command}")
                 self.logging.error(stdout if stdout else "")
                 self.logging.error(stderr if stderr else "")
             return process.returncode, stdout, stderr
-        except Exception as e:
+        except Exception as err:
             self.logging.error(f"Error executing command: {command}")
-            self.logging.error(str(e))
+            self.logging.error(str(err))
             self.logging.error(stdout if stdout else "")
             self.logging.error(stderr if stderr else "")
             return -1, None, None
 
-    def _cleanup_scheduler(self, platform):
+    def cleanup_scheduler(self, platform):
         if platform.environment["wait_before_cleanup"] != 0:
-            self.logging.info(
-                f"Waiting {platform.environment['wait_before_cleanup']} minutes before starting the cluster deletion"
-            )
+            self.logging.info(f"Waiting {platform.environment['wait_before_cleanup']} minutes before starting the cluster deletion")
             time.sleep(platform.environment["wait_before_cleanup"] * 60)
-        self.logging.info(
-            f"Attempting to start cleanup process of {len(platform.environment['clusters'])} clusters waiting {platform.environment['delay_between_cleanup']} minutes between each deletion"
-        )
+        self.logging.info(f"Attempting to start cleanup process of {len(platform.environment['clusters'])} clusters waiting {platform.environment['delay_between_cleanup']} minutes between each deletion")
         delete_cluster_thread_list = []
         for cluster_name, cluster_info in platform.environment["clusters"].items():
-            self.logging.info(
-                f"Attempting to start cleanup process of {cluster_name} on status: {cluster_info['status']}"
-            )
+            self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {cluster_info['status']}")
             try:
                 thread = threading.Thread(
                     target=platform.delete_cluster, args=(platform, cluster_name)
@@ -132,11 +121,10 @@ class Utils:
                 thread.start()
         return load_thread_list
 
-    def _install_scheduler(self, platform):
+    def install_scheduler(self, platform):
         self.logging.info(
             f"Attempting to start {platform.environment['cluster_count']} clusters with {platform.environment['batch_size']} batch size"
         )
-        platform.environment["clusters"] = {}
         cluster_thread_list = []
         batch_count = 0
         loop_counter = 0
@@ -176,7 +164,7 @@ class Utils:
                         try:
                             platform.environment["clusters"][cluster_name]["workers"] = cluster_workers
                             platform.environment["clusters"][cluster_name]["workers_wait_time"] = platform.environment["workers_wait_time"]
-                            platform.environment["clusters"][cluster_name]["index"] = (loop_counter - 1)
+                            platform.environment["clusters"][cluster_name]["index"] = loop_counter - 1
                             thread = threading.Thread(target=platform.create_cluster, args=(platform, cluster_name))
                             platform.environment["clusters"][cluster_name]["status"] = "creating"
                         except Exception as err:

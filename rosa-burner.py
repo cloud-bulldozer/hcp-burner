@@ -23,7 +23,7 @@ if __name__ == "__main__":
             platform_module_path = "libs.platforms." + arguments["platform"] + "." + arguments["subplatform"] + "." + arguments["subplatform"]
             platform_module = importlib.import_module(platform_module_path)
             PlatformClass = getattr(platform_module, arguments["subplatform"].capitalize())
-            platform = PlatformClass(arguments, logging, utils)
+            platform = PlatformClass(arguments, logging, utils, es)
         else:
             logging.info(f"Subplatform not detected, loading {arguments['platform']} module...")
             platform_module_path = "libs.platforms." + arguments["platform"] + "." + arguments["platform"]

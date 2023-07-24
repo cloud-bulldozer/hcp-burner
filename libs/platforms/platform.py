@@ -12,9 +12,10 @@ import configparser
 
 
 class Platform:
-    def __init__(self, arguments, logging, utils):
+    def __init__(self, arguments, logging, utils, es):
         self.utils = utils
         self.logging = logging
+        self.es = es
         self.environment = {}
 
         self.environment["commands"] = []

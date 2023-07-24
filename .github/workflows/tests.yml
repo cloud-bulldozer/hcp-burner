@@ -11,6 +11,8 @@ on:
         required: true
       ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER:
         required: true
+      ROSA_BURNER_ES_URL:
+        required: true
 jobs:
   test-rosa:
     runs-on: ubuntu-latest
@@ -48,6 +50,8 @@ jobs:
         ROSA_BURNER_OCM_TOKEN: ${{ secrets.ROSA_BURNER_OCM_TOKEN }}
         ROSA_BURNER_AWS_ACCOUNT_FILE: "/tmp/aws_config.ini"
         ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER: ${{ secrets.ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER}}
+        ROSA_BURNER_ES_URL: ${{ secrets.ROSA_BURNER_ES_URL}}
+        ROSA_BURNER_ES_INDEX: "rosa-burner"
 
     # - name: Install bats
     #   uses: mig4/setup-bats@v1

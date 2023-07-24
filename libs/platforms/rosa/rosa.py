@@ -15,8 +15,8 @@ from libs.platforms.platform import PlatformArguments
 
 
 class Rosa(Platform):
-    def __init__(self, arguments, logging, utils):
-        super().__init__(arguments, logging, utils)
+    def __init__(self, arguments, logging, utils, es):
+        super().__init__(arguments, logging, utils, es)
 
         aws = AWS(logging, arguments["aws_account_file"], arguments["aws_profile"])
         aws.set_aws_envvars(arguments['aws_profile'], arguments['aws_region'])

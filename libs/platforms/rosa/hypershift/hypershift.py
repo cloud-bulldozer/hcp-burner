@@ -15,8 +15,8 @@ from libs.platforms.rosa.rosa import RosaArguments
 
 
 class Hypershift(Rosa):
-    def __init__(self, arguments, logging, utils):
-        super().__init__(arguments, logging, utils)
+    def __init__(self, arguments, logging, utils, es):
+        super().__init__(arguments, logging, utils, es)
 
         self.environment["service_cluster"] = arguments["service_cluster"]
 
@@ -402,16 +402,15 @@ class Hypershift(Rosa):
         cluster_end_time = int(time.time())
         cluster_info["destroy_duration"] = cluster_delete_end_time - cluster_start_time
         cluster_info["destroy_all_duration"] = cluster_end_time - cluster_start_time
-        # try:
-        #     with open(path + "/" + cluster_name + "/metadata_destroy.json", "w") as metadata_file:
-        #         json.dump(metadata, metadata_file)
-        # except Exception as err:
-        #     logging.error(err)
-        #     logging.error('Failed to write metadata_destroy.json file located %s' % cluster_path)
-        # if es is not None:
-        #     metadata["timestamp"] = datetime.datetime.utcnow().isoformat()
-        #     es_ignored_metadata = ""
-        #     common._index_result(es, index, metadata, es_ignored_metadata, index_retry)
+        try:
+            with open(cluster_info['path'] + "/metadata_destroy.json", "w") as metadata_file:
+                json.dump(cluster_info, metadata_file)
+        except Exception as err:
+            self.logging.error(err)
+            self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
+        if self.es is not None:
+            cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+            self.es.index_metadata(cluster_info)
 
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
@@ -528,30 +527,29 @@ class Hypershift(Rosa):
             # cluster_info['mgmt_cluster_name'] = mgmt_cluster_name
             # metadata['job_iterations'] = str(job_iterations) if cluster_load else 0
             # metadata['load_duration'] = load_duration if cluster_load else ""
-            # try:
-            #     with open(cluster_path + "/metadata_install.json", "w") as metadata_file:
-            #         json.dump(metadata, metadata_file)
-            # except Exception as err:
-            #     logging.error(err)
-            #     logging.error('Failed to write metadata_install.json file located %s' % cluster_path)
-            # if es is not None:
-            #     metadata["timestamp"] = datetime.datetime.utcnow().isoformat()
-            #     es_ignored_metadata = ""
-            #     common._index_result(es, index, metadata, es_ignored_metadata, index_retry)
+            try:
+                with open(cluster_info['path'] + "/metadata_install.json", "w") as metadata_file:
+                    json.dump(cluster_info, metadata_file)
+            except Exception as err:
+                self.logging.error(err)
+                self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
+            if self.es is not None:
+                cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+                self.es.index_metadata(cluster_info)
             # if cluster_load:
-            #     with all_clusters_installed:
-            #         logging.info('Waiting for all clusters to be installed to start e2e-benchmarking execution on %s' % cluster_name)
-            #         all_clusters_installed.wait()
-            #     logging.info('Executing e2e-benchmarking to add load on the cluster %s with %s nodes during %s with %d iterations' % (cluster_name, str(worker_nodes), load_duration, job_iterations))
-            #     _cluster_load(kubeconfig, cluster_path, cluster_name, mgmt_cluster_name, service_cluster_name, load_duration, job_iterations, es_url, mgmt_kubeconfig_path, workload_type, kube_burner_version, e2e_git_details, git_branch)
-            #     logging.info('Finished execution of e2e-benchmarking workload on %s' % cluster_name)
-            # if must_gather_all or create_cluster_code != 0:
-            #     random_sleep = random.randint(60, 300)
-            #     logging.info("Waiting %d seconds before dumping hosted cluster must-gather" % random_sleep)
-            #     time.sleep(random_sleep)
-            #     logging.info("Saving must-gather file of hosted cluster %s" % cluster_name)
-            #     _get_must_gather(cluster_path, cluster_name)
-            #     _get_mgmt_cluster_must_gather(mgmt_kubeconfig_path, path)
+                #     with all_clusters_installed:
+                #         logging.info('Waiting for all clusters to be installed to start e2e-benchmarking execution on %s' % cluster_name)
+                #         all_clusters_installed.wait()
+                #     logging.info('Executing e2e-benchmarking to add load on the cluster %s with %s nodes during %s with %d iterations' % (cluster_name, str(worker_nodes), load_duration, job_iterations))
+                #     _cluster_load(kubeconfig, cluster_path, cluster_name, mgmt_cluster_name, service_cluster_name, load_duration, job_iterations, es_url, mgmt_kubeconfig_path, workload_type, kube_burner_version, e2e_git_details, git_branch)
+                #     logging.info('Finished execution of e2e-benchmarking workload on %s' % cluster_name)
+                # if must_gather_all or create_cluster_code != 0:
+                #     random_sleep = random.randint(60, 300)
+                #     logging.info("Waiting %d seconds before dumping hosted cluster must-gather" % random_sleep)
+                #     time.sleep(random_sleep)
+                #     logging.info("Saving must-gather file of hosted cluster %s" % cluster_name)
+                #     _get_must_gather(cluster_path, cluster_name)
+                #     _get_mgmt_cluster_must_gather(mgmt_kubeconfig_path, path)
 
     def _namespace_wait(self, kubeconfig, cluster_id, cluster_name, type):
         start_time = int(time.time())

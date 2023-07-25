@@ -259,9 +259,9 @@ class Rosa(Platform):
         self.logging.info(f"Collecting preflight times for cluster {cluster_name} during 60 minutes until {datetime.datetime.fromtimestamp(start_time + 60 * 60)}")
         # Waiting 1 hour for preflight checks to end
         while datetime.datetime.utcnow().timestamp() < start_time + 60 * 60:
-            # if force_terminate:
-            #     logging.error("Exiting preflight times capturing on %s cluster after capturing Ctrl-C" % cluster_name)
-            #     return 0
+            if self.utils.force_terminate:
+                self.logging.error(f"Exiting preflight times capturing on {cluster_name} cluster after capturing Ctrl-C")
+                return 0
             self.logging.info(f"Getting status for cluster {cluster_name}")
             status_code, status_out, status_err = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_id + " -o json", extra_params={"universal_newlines": True})
             current_time = int(time.time())
@@ -282,7 +282,7 @@ class Rosa(Platform):
                 self.logging.debug(f"Cluster {cluster_name} on {current_status} status. Waiting 2 seconds until {datetime.datetime.fromtimestamp(start_time + 60 * 60)} for next check")
                 time.sleep(1)
             previous_status = current_status
-        self.logging.error("Cluster {cluster_name} on {current_status} status (not installing) after 60 minutes. Exiting preflight waiting...")
+        self.logging.error(f"Cluster {cluster_name} on {current_status} status (not installing) after 60 minutes. Exiting preflight waiting...")
         return return_data
 
     def get_cluster_admin_access(self, cluster_name, path):
@@ -294,9 +294,9 @@ class Rosa(Platform):
         self.logging.debug(rosa_create_admin_cmd)
         # Waiting 30 minutes for cluster-admin user to be created
         while (datetime.datetime.utcnow().timestamp() < cluster_admin_create_time + 30 * 60):
-            # if force_terminate:
-            #     logging.error("Exiting cluster access process for %s cluster after capturing Ctrl-C" % cluster_name)
-            #     return return_data
+            if self.utils.force_terminate:
+                self.logging.error(f"Exiting cluster access process for {cluster_name} cluster after capturing Ctrl-C")
+                return return_data
             # Not using subprocess_exec() because this is the only one execution where stdout and stderr goes to different descriptors
             process = subprocess.Popen(rosa_create_admin_cmd, stdout=subprocess.PIPE, stderr=rosa_create_admin_debug_log, cwd=path, universal_newlines=True)
             stdout, stderr = process.communicate()
@@ -313,9 +313,9 @@ class Rosa(Platform):
                 self.logging.info(f"Trying to login on cluster {cluster_name} (30 minutes timeout until {datetime.datetime.fromtimestamp(oc_login_time + 30 * 60)}, 5s timeout on oc command)")
                 start_json = stdout.find("{")
                 while datetime.datetime.utcnow().timestamp() < oc_login_time + 30 * 60:
-                    # if force_terminate:
-                    #     self.logging.error("Exiting cluster access process for %s cluster after capturing Ctrl-C" % cluster_name)
-                    #     return return_data
+                    if self.utils.force_terminate:
+                        self.logging.error(f"Exiting cluster access process for {cluster_name} cluster after capturing Ctrl-C")
+                        return return_data
                     (oc_login_code, oc_login_out, oc_login_err) = self.utils.subprocess_exec(
                         "oc login " + json.loads(stdout[start_json:])["api_url"] + " --username " + json.loads(stdout[start_json:])["username"] + " --password " + json.loads(stdout[start_json:])["password"] + " --kubeconfig " + path + "/kubeconfig --insecure-skip-tls-verify=true --request-timeout=30s",
                         extra_params={"cwd": path, "universal_newlines": True},
@@ -332,9 +332,9 @@ class Rosa(Platform):
                         myenv["KUBECONFIG"] = return_data["kubeconfig"]
                         self.logging.info("Trying to perform oc adm command on cluster %s until %s" % (cluster_name, datetime.datetime.fromtimestamp(oc_adm_time_start + 30 * 60)))
                         while (datetime.datetime.utcnow().timestamp() < oc_adm_time_start + 30 * 60):
-                            # if force_terminate:
-                            #     self.logging.error("Exiting cluster access process for %s cluster after capturing Ctrl-C" % cluster_name)
-                            #     return return_data
+                            if self.utils.force_terminate:
+                                self.logging.error(f"Exiting cluster access process for {cluster_name} cluster after capturing Ctrl-C")
+                                return return_data
                             (oc_adm_code, oc_adm_out, oc_adm_err
                              ) = self.utils.subprocess_exec(
                                 "oc adm top images",

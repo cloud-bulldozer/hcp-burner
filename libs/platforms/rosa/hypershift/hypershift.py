@@ -264,7 +264,7 @@ class Hypershift(Rosa):
         file_path = os.path.join(self.environment["path"], "terminate_watcher")
         if os.path.exists(file_path):
             os.remove(file_path)
-        while True:
+        while not self.utils.force_terminate:
             self.logging.debug(self.environment['clusters'])
             if os.path.isfile(
                 os.path.join(self.environment["path"], "terminate_watcher")
@@ -358,11 +358,7 @@ class Hypershift(Rosa):
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_start_time = int(time.time())
         self.logging.info(f"Deleting cluster {cluster_name} on Hypershift Platform")
-        # cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("rosa delete cluster -c " + cluster_name + " -y --watch", cluster_info['path'] + '/cleanup.log', {'preexec_fn': disable_signals})
-        cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec(
-            "rosa delete cluster -c " + cluster_name + " -y --watch",
-            cluster_info["path"] + "/cleanup.log",
-        )
+        cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("rosa delete cluster -c " + cluster_name + " -y --watch", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
         cluster_delete_end_time = int(time.time())
         if cleanup_code == 0:
             self.logging.debug(
@@ -376,17 +372,7 @@ class Hypershift(Rosa):
                 self.logging.debug(
                     f"Destroying STS associated resources of cluster name: {cluster_name}"
                 )
-                # operators_code, operators_out, operators_err = common._subprocess_exec("rosa delete operator-roles --prefix " + cluster_name + " -m auto -y", cluster_info['path'] + '/cleanup.log', {'preexec_fn': disable_signals})
-                (
-                    operators_code,
-                    operators_out,
-                    operators_err,
-                ) = self.utils.subprocess_exec(
-                    "rosa delete operator-roles --prefix "
-                    + cluster_name
-                    + " -m auto -y",
-                    cluster_info["path"] + "/cleanup.log",
-                )
+                (operators_code, operators_out, operators_err) = self.utils.subprocess_exec("rosa delete operator-roles --prefix " + cluster_name + " -m auto -y", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
                 if operators_code != 0:
                     self.logging.error(
                         f"Failed to delete operator roles on cluster {cluster_name}"
@@ -439,13 +425,12 @@ class Hypershift(Rosa):
         self.logging.info(f"Trying to install cluster {cluster_name} with {cluster_info['workers']} workers up to 5 times")
         trying = 0
         while trying <= 5:
-            # if force_terminate:
-            #     logging.error("Exiting cluster creation for %s after capturing Ctrl-C" % cluster_name)
-            #     return 0
+            if self.utils.force_terminate:
+                self.logging.error(f"Exiting cluster creation for {cluster_name} after capturing Ctrl-C")
+                return 0
             self.logging.info("Cluster Create Command:")
             self.logging.info(cluster_cmd)
-            # create_cluster_code, create_cluster_out, create_cluster_err = self.utils.subprocess_exec(' '.join(str(x) for x in cluster_cmd), cluster_path + "/installation.log", {'preexec_fn': disable_signals})
-            (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/installation.log")
+            (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals})
             trying += 1
             if create_cluster_code != 0:
                 cluster_info["install_try"] = trying
@@ -477,8 +462,7 @@ class Hypershift(Rosa):
         # mgmt_kubeconfig_path = _download_kubeconfig(ocm_cmnd, mgmt_metadata['cluster_id'], cluster_path, "mgmt") if mgmt_cluster_name else None
         # mc_namespace_timing = _namespace_wait(mgmt_kubeconfig_path, metadata['cluster_id'], cluster_name, "Management") - cluster_start_time if mgmt_kubeconfig_path else 0
         # metadata['mgmt_namespace'] = mc_namespace_timing
-        watch_code, watch_out, watch_err = self.utils.subprocess_exec("rosa logs install -c " + cluster_name + " --watch", cluster_info["path"] + "/installation.log")
-        # watch_code, watch_out, watch_err = self.utils.subprocess_exec("rosa logs install -c " + cluster_name + " --watch", cluster_info['path'] + "/installation.log", {'preexec_fn': disable_signals})
+        watch_code, watch_out, watch_err = self.utils.subprocess_exec("rosa logs install -c " + cluster_name + " --watch", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals})
         if watch_code != 0:
             cluster_info['status'] = "not ready"
             return 1
@@ -560,9 +544,9 @@ class Hypershift(Rosa):
         myenv["KUBECONFIG"] = kubeconfig
         # Waiting 30 minutes for preflight checks to end
         while datetime.datetime.utcnow().timestamp() < start_time + 30 * 60:
-            # if force_terminate:
-            #     logging.error("Exiting namespace creation waiting for %s on the %s cluster after capturing Ctrl-C" % (cluster_name, type))
-            #     return 0
+            if self.utils.force_terminate:
+                self.logging.error(f"Exiting namespace creation waiting for {cluster_name} on the {type} cluster after capturing Ctrl-C")
+                return 0
             (
                 oc_project_code,
                 oc_project_out,

@@ -5,6 +5,7 @@ import sys
 import shutil
 import errno
 import string
+import signal
 import random
 import time
 import subprocess
@@ -15,6 +16,14 @@ from git import Repo
 class Utils:
     def __init__(self, logging):
         self.logging = logging
+        self.force_terminate = False
+
+    def set_force_terminate(self, signum, frame):
+        self.logging.warning("Captured Ctrl-C, sending exit event to watcher, any cluster install/delete will continue its execution")
+        self.force_terminate = True
+
+    def disable_signals(self):
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     def create_path(self, path):
         try:
@@ -131,8 +140,7 @@ class Utils:
         try:
             while loop_counter < platform.environment["cluster_count"]:
                 self.logging.debug(platform.environment["clusters"])
-                # if force_terminate:
-                if 1 == 0:
+                if self.force_terminate:
                     loop_counter += 1
                 else:
                     create_cluster = False
@@ -195,11 +203,9 @@ class Utils:
         load_env["LOG_LEVEL"] = "debug"
         load_env["WORKLOAD"] = platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
-        load_code, load_out, load_err = self.subprocess_exec(platform.environment['load']['script'], my_path + '/cluster_load.log', extra_params={'cwd': my_path + "/workload", 'env': load_env})
-        if load_code != 0:
-            self.logging.error(f"Failed to execute workload {platform.environment['load']['script']} on {cluster_name}")
-        # if not force_terminate:
-        #     load_process = subprocess.Popen(load_command, stdout=load_log, stderr=load_log, env=load_env)
-        #     load_process_stdout, load_process_stderr = load_process.communicate()
-        # else:
-        #     logging.warning("Not starting e2e on cluster %s after capturing Ctrl-C" % hosted_cluster_name)
+        if not self.force_terminate:
+            load_code, load_out, load_err = self.subprocess_exec(platform.environment['load']['script'], my_path + '/cluster_load.log', extra_params={'cwd': my_path + "/workload", 'env': load_env})
+            if load_code != 0:
+                self.logging.error(f"Failed to execute workload {platform.environment['load']['script']} on {cluster_name}")
+        else:
+            self.logging.warning(f"Not starting workload on {cluster_name} after capturing Ctrl-C")

@@ -5,6 +5,7 @@ import sys
 import time
 import importlib
 import threading
+import signal
 from libs.arguments import Arguments
 from libs.logging import Logging
 from libs.elasticsearch import Elasticsearch
@@ -44,6 +45,9 @@ if __name__ == "__main__":
         utils.verify_cmnd(command)
 
     platform.initialize()
+
+    logging.info("Starting capturing Ctrl-C key from this point")
+    signal.signal(signal.SIGINT, utils.set_force_terminate)
 
     watcher = threading.Thread(target=platform.watcher)
     watcher.daemon = True

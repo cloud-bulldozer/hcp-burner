@@ -200,7 +200,7 @@ class Platform:
                     f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Stopping wait."
                 )
                 result.append(ready_nodes)
-                result.append(int(time.time()))
+                result.append(int(datetime.datetime.utcnow().timestamp()))
                 return result
             else:
                 self.logging.info(

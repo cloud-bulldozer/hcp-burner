@@ -114,6 +114,17 @@ class Utils:
                 time.sleep(platform.environment["delay_between_cleanup"])
         return delete_cluster_thread_list
 
+    # To form the cluster_info dict for cleanup funtions
+    # It will be called only when --cleanup-clusters without --install-clusters
+    def get_cluster_info(self, platform):
+        loop_counter = 0
+        while loop_counter < platform.environment["cluster_count"]:
+            loop_counter += 1
+            cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
+            platform.environment["clusters"][cluster_name] = platform.get_metadata(cluster_name)
+            platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
+        return platform
+
     def load_scheduler(self, platform):
         load_thread_list = []
         self.logging.info(f"Attempting to start {platform.environment['load']['executor']} {platform.environment['load']['workload']} load process on {len(platform.environment['clusters'])} clusters")

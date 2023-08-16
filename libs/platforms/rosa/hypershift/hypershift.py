@@ -21,12 +21,13 @@ class Hypershift(Rosa):
         self.environment["service_cluster"] = arguments["service_cluster"]
 
         self.environment["create_vpcs"] = arguments["create_vpcs"]
-        if str(arguments["create_vpcs"]).lower() == "true":
+        self.environment["delete_vpcs"] = arguments["delete_vpcs"]
+        if str(arguments["create_vpcs"]).lower() == "true" or str(arguments["delete_vpcs"]).lower() == "true":
             self.environment["commands"].append("terraform")
             self.environment["clusters_per_vpc"] = arguments["clusters_per_vpc"]
             self.environment["terraform_retry"] = arguments["terraform_retry"]
         else:
-            if (arguments["wildcard_options"] and "--subnets-ids" not in arguments["wildcard_options"] or not arguments["wildcard_options"]):
+            if (arguments["install_clusters"]) and (arguments["wildcard_options"] and "--subnets-ids" not in arguments["wildcard_options"] or not arguments["wildcard_options"]):
                 self.logging.error("Cluster creation will fail. No subnets are provided and no --create-vpcs command is selected")
                 sys.exit("Exiting...")
             else:
@@ -103,7 +104,7 @@ class Hypershift(Rosa):
         # Delete oidc-config
         self._delete_oidc_config() if self.environment["oidc_cleanup"] else None
         # Delete VPCs
-        self._destroy_vpcs() if self.environment["create_vpcs"] else None
+        self._destroy_vpcs() if (self.environment["create_vpcs"] or self.environment["delete_vpcs"]) else None
 
     def _create_vpcs(self, vpcs_to_create):
         self.logging.info("Initializing Terraform with: terraform init")
@@ -605,6 +606,7 @@ class HypershiftArguments(RosaArguments):
         parser.add_argument("--clusters-per-vpc", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTERS_PER_VPC", help="Number of HC to create on each VPC", type=int, default=1, choices=range(1, 11))
         parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
         parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
+        parser.add_argument("--delete-vpcs", action="store_true", help="Delete all VPC after cleanup")
 
         if config_file:
             config = configparser.ConfigParser()

@@ -57,11 +57,13 @@ To use the config file, define common parameters under the `[Defaults]` section
 | Argument                 | Default Value     | Config file variable | Environment Variable           |
 |--------------------------|-------------------|----------------------|--------------------------------|
 | --config-file            |                   |                      | ROSA_BURNER_CONFIG_FILE        |
+| --install-clusters       |                   |                      |                                |
 | --platform               |                   | platform             | ROSA_BURNER_PLATFORM           |
 | --subplatform            |                   | subplatform          | ROSA_BURNER_SUBPLATFORM        |
 | --uuid                   |                   |                      | ROSA_BURNER_UUID               |
 | --path                   |                   |                      | ROSA_BURNER_PATH               |
 | --cluster-name-seed      |                   |                      | ROSA_BURNER_CLUSTER_NAME_SEED  |
+| --static-cluster-name    |                   |                      | ROSA_BURNER_STATIC_CLUSTER_NAME|
 | --workers                | 3                 |                      | ROSA_BURNER_WORKERS            |
 | --workers-wait-time      | 60                |                      | ROSA_BURNER_WORKERS_WAIT_TIME  |
 | --wait-for-workers       |                   |                      |                                |

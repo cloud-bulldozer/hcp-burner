@@ -55,9 +55,13 @@ class Platform:
         self.environment["workers_wait_time"] = (
             arguments["workers_wait_time"] if arguments["wait_for_workers"] else None
         )
+        if arguments["install_clusters"]:
+            self.environment["install_clusters"] = True
+        else:
+            self.environment["install_clusters"] = False
 
+        self.environment['load'] = {}
         if arguments['enable_workload']:
-            self.environment['load'] = {}
             self.environment['load']["workload"] = arguments["workload"]
             self.environment['load']["repo"] = arguments["workload_repo"]
             self.environment['load']["script"] = arguments["workload_script"]
@@ -65,7 +69,10 @@ class Platform:
             self.environment['load']['duration'] = arguments['workload_duration']
             self.environment['load']['jobs'] = arguments['workload_jobs']
 
-        self.environment["cluster_name_seed"] = utils.generate_cluster_name_seed(arguments["cluster_name_seed"])
+        if arguments["static_cluster_name"]:
+            self.environment["cluster_name_seed"] = arguments["static_cluster_name"]
+        else:
+            self.environment["cluster_name_seed"] = utils.generate_cluster_name_seed(arguments["cluster_name_seed"])
 
         self.environment["wildcard_options"] = arguments["wildcard_options"]
 
@@ -75,14 +82,16 @@ class Platform:
             self.environment["delay_between_cleanup"] = arguments[
                 "delay_between_cleanup"
             ]
+        else:         
+            self.environment["cleanup_clusters"] = False
 
         try:
             self.logging.debug("Saving test UUID to the working directory")
-            uuid_file = open(self.environment["path"] + "/uuid", "x")
+            uuid_file = open(self.environment["path"] + "/uuid", "w")
             uuid_file.write(self.environment["uuid"])
             uuid_file.close()
             self.logging.debug("Saving cluster_name_seed to the working directory")
-            seed_file = open(self.environment["path"] + "/cluster_name_seed", "x")
+            seed_file = open(self.environment["path"] + "/cluster_name_seed", "w")
             seed_file.write(self.environment["cluster_name_seed"])
             seed_file.close()
         except Exception as err:

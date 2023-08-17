@@ -82,7 +82,7 @@ class Platform:
             self.environment["delay_between_cleanup"] = arguments[
                 "delay_between_cleanup"
             ]
-        else:         
+        else:
             self.environment["cleanup_clusters"] = False
 
         try:

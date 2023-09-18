@@ -121,7 +121,9 @@ class Utils:
         while loop_counter < platform.environment["cluster_count"]:
             loop_counter += 1
             cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
-            platform.environment["clusters"][cluster_name] = platform.get_metadata(cluster_name)
+            platform.environment["clusters"][cluster_name] = {}
+            platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(cluster_name)
+            platform.environment["clusters"][cluster_name]["status"] = platform.environment["clusters"][cluster_name]["metadata"]["status"]
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
         return platform
 

@@ -56,11 +56,12 @@ class Platform:
             arguments["workers_wait_time"] if arguments["wait_for_workers"] else None
         )
 
+        self.environment['load'] = {}
         if arguments['enable_workload']:
-            self.environment['load'] = {}
+            self.environment['load']['enabled'] = "true"
             self.environment['load']["workload"] = arguments["workload"]
             self.environment['load']["repo"] = arguments["workload_repo"]
-            self.environment['load']["script"] = arguments["workload_script"]
+            self.environment['load']["script_path"] = arguments["workload_script_path"]
             self.environment['load']["executor"] = arguments["workload_executor"]
             self.environment['load']['duration'] = arguments['workload_duration']
             self.environment['load']['jobs'] = arguments['workload_jobs']

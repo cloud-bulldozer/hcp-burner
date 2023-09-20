@@ -73,7 +73,7 @@ To use the config file, define common parameters under the `[Defaults]` section
 | --enable-workload        |                   |                      |                                |
 | --workload-repo          | https://github.com/cloud-bulldozer/e2e-benchmarking.git | workload_repo | ROSA_BURNER_WORKLOAD_REPO |
 | --workload               | cluster-density-ms | workload             | ROSA_BURNER_WORKLOAD           |
-| --workload-script        | workloads/kube-burner-ocp-wrapper/run.sh | workload_script | ROSA_BURNER_WORKLOAD_SCRIPT |
+| --workload-script-path        | workloads/kube-burner-ocp-wrapper | workload_script_path | ROSA_BURNER_WORKLOAD_SCRIPT_PATH |
 | --workload-executor      | /usr/bin/kube-burner | workload_executor | ROSA_BURNER_WORKLOAD_EXECUTOR |
 | --workload-duration      | 1h                |                      | ROSA_BURNER_WORKLOAD_DURATION  |
 | --workload-jobs          | 10                |                      | ROSA_BURNER_WORKLOAD_JOBS      |

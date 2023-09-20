@@ -309,7 +309,7 @@ class Rosa(Platform):
             else:
                 oc_login_time = int(time.time())
                 self.logging.info(f"cluster-admin user creation succesfull on cluster {cluster_name}")
-                return_data["cluster-admin-create"] = (int(time.time()) - cluster_admin_create_time)
+                return_data["cluster_admin_create"] = (int(time.time()) - cluster_admin_create_time)
                 self.logging.info(f"Trying to login on cluster {cluster_name} (30 minutes timeout until {datetime.datetime.fromtimestamp(oc_login_time + 30 * 60)}, 5s timeout on oc command)")
                 start_json = stdout.find("{")
                 while datetime.datetime.utcnow().timestamp() < oc_login_time + 30 * 60:
@@ -326,7 +326,7 @@ class Rosa(Platform):
                     else:
                         oc_adm_time_start = int(time.time())
                         self.logging.info("Login succesfull on cluster %s" % cluster_name)
-                        return_data["cluster-admin-login"] = (int(time.time()) - oc_login_time)
+                        return_data["cluster_admin_login"] = (int(time.time()) - oc_login_time)
                         return_data["kubeconfig"] = path + "/kubeconfig"
                         myenv = os.environ.copy()
                         myenv["KUBECONFIG"] = return_data["kubeconfig"]
@@ -356,7 +356,7 @@ class Rosa(Platform):
                                     "Verified admin access to %s, using %s kubeconfig file."
                                     % (cluster_name, path + "/kubeconfig")
                                 )
-                                return_data["cluster-oc-adm"] = (
+                                return_data["cluster_oc_adm"] = (
                                     int(time.time()) - oc_adm_time_start
                                 )
                                 return return_data

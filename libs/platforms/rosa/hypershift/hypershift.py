@@ -487,9 +487,9 @@ class Hypershift(Rosa):
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
             access_timers = self.get_cluster_admin_access(cluster_name, cluster_info["path"])
             cluster_info["kubeconfig"] = access_timers.get("kubeconfig", None)
-            cluster_info["cluster-admin-create"] = access_timers.get("cluster-admin-create", None)
-            cluster_info["cluster-admin-login"] = access_timers.get("cluster-admin-login", None)
-            cluster_info["cluster-oc-adm"] = access_timers.get("cluster-oc-adm", None)
+            cluster_info["cluster_admin_create"] = access_timers.get("cluster_admin_create", None)
+            cluster_info["cluster_admin_login"] = access_timers.get("cluster_admin_login", None)
+            cluster_info["cluster_oc_adm"] = access_timers.get("cluster_oc_adm", None)
             if not cluster_info["kubeconfig"]:
                 self.logging.error(f"Failed to download kubeconfig file for cluster {cluster_name}. Disabling wait for workers and workload execution")
                 cluster_info["workers_wait_time"] = None

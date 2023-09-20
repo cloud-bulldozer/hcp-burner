@@ -145,24 +145,26 @@ class Platform:
                 "ocm get cluster " + self.get_cluster_id(cluster_name),
                 extra_params={"universal_newlines": True},
         )
-        metadata = {}
-        if resp_code == 0:
-            for cluster in json.loads(resp_out):
-                if cluster['id'] == cluster_name or cluster['name'] == cluster_name:
-                    metadata['cluster_name'] = cluster['name']
-                    metadata['infra_id'] = cluster['infra_id']
-                    metadata['cluster_id'] = cluster['id']
-                    metadata['version'] = cluster['openshift_version']
-                    metadata['base_domain'] = cluster['dns']['base_domain']
-                    metadata['aws_region'] = cluster['region']['id']
-                    if 'compute' in cluster['nodes']:
-                        metadata['workers'] = cluster['nodes']['compute']
-                    else:  # when autoscaling enabled
-                        metadata['workers'] = cluster['nodes']['autoscale_compute']['min_replicas']
-                        metadata['workers_min'] = cluster['nodes']['autoscale_compute']['min_replicas']
-                        metadata['workers_max'] = cluster['nodes']['autoscale_compute']['max_replicas']
-                    metadata['workers_type'] = cluster['nodes']['compute_machine_type']['id']
-                    metadata['network_type'] = cluster['network']['type']
+        try:
+            cluster = json.loads(resp_out)
+        except Exception as err:
+            self.logging.error(f"Cannot load metadata for cluster {cluster_name}")
+            self.logging.error(err)        
+        metadata = {}           
+        metadata['cluster_name'] = cluster.get("name", None)
+        metadata['infra_id'] = cluster.get("infra_id", None)
+        metadata['cluster_id'] = cluster.get("id", None)
+        metadata['version'] = cluster.get("openshift_version", None)
+        metadata['base_domain'] = cluster.get("dns", {}).get("base_domain", None)
+        metadata['aws_region'] = cluster.get("region", {}).get("id", None)
+        if 'compute' in cluster.get("nodes", {}):
+            metadata['workers'] = cluster.get("nodes", {}).get("compute", None)
+        else:  # when autoscaling enabled
+            metadata['workers'] = cluster.get("nodes", {}).get("autoscale_compute", {}).get("min_replicas", None)
+            metadata['workers_min'] = cluster.get("nodes", {}).get("autoscale_compute", {}).get("min_replicas", None)
+            metadata['workers_max'] = cluster.get("nodes", {}).get("autoscale_compute", {}).get("max_replicas", None)
+        metadata['workers_type'] = cluster.get("nodes", {}).get("compute_machine_type", {}).get("id", None)
+        metadata['network_type'] = cluster.get("network", {}).get("type", None)
         return metadata
 
     def _wait_for_workers(

@@ -62,6 +62,7 @@ class Platform:
 
         self.environment['load'] = {}
         if arguments['enable_workload']:
+            self.environment['load']["enabled"] = "true"
             self.environment['load']["workload"] = arguments["workload"]
             self.environment['load']["repo"] = arguments["workload_repo"]
             self.environment['load']["script"] = arguments["workload_script"]

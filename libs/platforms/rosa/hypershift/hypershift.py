@@ -413,6 +413,7 @@ class Hypershift(Rosa):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["hostedclusters"] = self.environment["cluster_count"]
         cluster_info["install_method"] = "rosa"
         self.logging.info(f"Creating cluster {cluster_info['index']} on Hypershift with name {cluster_name} and {cluster_info['workers']} workers")
         cluster_info["path"] = platform.environment["path"] + "/" + cluster_name
@@ -521,6 +522,7 @@ class Hypershift(Rosa):
                                 return 1
             cluster_info['status'] = "ready"
             cluster_info["mgmt_cluster_name"] = mgmt_cluster_name
+            cluster_info["metadata"]["mgmt_cluster"] = self.get_ocm_cluster_info(mgmt_cluster_name)
             # metadata['job_iterations'] = str(job_iterations) if cluster_load else 0
             # metadata['load_duration'] = load_duration if cluster_load else ""
             try:

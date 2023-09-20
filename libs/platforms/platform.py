@@ -139,6 +139,32 @@ class Platform:
         )
         return json.loads(describe_out).get("id", None) if describe_code == 0 else None
 
+    def get_ocm_cluster_info(self, cluster_name):
+        self.logging.info(f"Get Cluster metadata of {cluster_name}")
+        resp_code, resp_out, resp_err = self.utils.subprocess_exec(
+                "ocm get cluster " + self.get_cluster_id(cluster_name),
+                extra_params={"universal_newlines": True},
+        )
+        metadata = {}
+        if resp_code == 0:
+            for cluster in json.loads(resp_out):
+                if cluster['id'] == cluster_name or cluster['name'] == cluster_name:
+                    metadata['cluster_name'] = cluster['name']
+                    metadata['infra_id'] = cluster['infra_id']
+                    metadata['cluster_id'] = cluster['id']
+                    metadata['version'] = cluster['openshift_version']
+                    metadata['base_domain'] = cluster['dns']['base_domain']
+                    metadata['aws_region'] = cluster['region']['id']
+                    if 'compute' in cluster['nodes']:
+                        metadata['workers'] = cluster['nodes']['compute']
+                    else:  # when autoscaling enabled
+                        metadata['workers'] = cluster['nodes']['autoscale_compute']['min_replicas']
+                        metadata['workers_min'] = cluster['nodes']['autoscale_compute']['min_replicas']
+                        metadata['workers_max'] = cluster['nodes']['autoscale_compute']['max_replicas']
+                    metadata['workers_type'] = cluster['nodes']['compute_machine_type']['id']
+                    metadata['network_type'] = cluster['network']['type']
+        return metadata
+
     def _wait_for_workers(
         self, kubeconfig, worker_nodes, wait_time, cluster_name, machinepool_name
     ):

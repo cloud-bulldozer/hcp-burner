@@ -46,25 +46,26 @@ if __name__ == "__main__":
 
     platform.initialize()
 
-    logging.info("Starting capturing Ctrl-C key from this point")
-    signal.signal(signal.SIGINT, utils.set_force_terminate)
+    if str(platform.environment['install_clusters']).lower() == "true":
+        logging.info("Starting capturing Ctrl-C key from this point")
+        signal.signal(signal.SIGINT, utils.set_force_terminate)
 
-    watcher = threading.Thread(target=platform.watcher)
-    watcher.daemon = True
-    watcher.start()
+        watcher = threading.Thread(target=platform.watcher)
+        watcher.daemon = True
+        watcher.start()
 
-    install_threads = utils.install_scheduler(platform)
-    logging.info(f"{len(install_threads)} threads created for installing clusters. Waiting for them to finish")
-    for thread in install_threads:
-        try:
-            thread.join()
-        except RuntimeError as err:
-            if "cannot join current thread" in err.args[0]:
-                # catchs main thread
-                continue
-            else:
-                raise
-    watcher.join()
+        install_threads = utils.install_scheduler(platform)
+        logging.info(f"{len(install_threads)} threads created for installing clusters. Waiting for them to finish")
+        for thread in install_threads:
+            try:
+                thread.join()
+            except RuntimeError as err:
+                if "cannot join current thread" in err.args[0]:
+                    # catchs main thread
+                    continue
+                else:
+                    raise
+        watcher.join()
 
     if 'enabled' in platform.environment['load'] and str(platform.environment['load']['enabled']).lower() == "true":
         # Prometheus takes a lot of time to start after all nodes are ready. we maybe needs to increase this sleep in the future
@@ -83,6 +84,8 @@ if __name__ == "__main__":
                     raise
 
     if str(platform.environment["cleanup_clusters"]).lower() == "true":
+        if len(platform.environment['clusters']) < 1:
+            platform = utils.get_cluster_info(platform)
         delete_threads = utils.cleanup_scheduler(platform)
         logging.info(f"{len(delete_threads)} threads created for deleting clusters. Waiting for them to finish")
         for thread in delete_threads:
@@ -95,6 +98,6 @@ if __name__ == "__main__":
                 else:
                     raise
 
-    platform.platform_cleanup()
+        platform.platform_cleanup()
 
     # utils.test_recap(platform)

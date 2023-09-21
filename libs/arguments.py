@@ -23,11 +23,15 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--config-file", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CONFIG_FILE", type=str)
 
+        self.common_parser.add_argument("--install-clusters", action="store_true", help="Start bringing up clusters")
+
         self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="ROSA_BURNER_PLATFORM", required=True, choices=["rosa"])
         self.common_parser.add_argument("--subplatform", dest="subplatform", action=EnvDefault, env=environment, envvar="ROSA_BURNER_SUBPLATFORM", help="Subplatforms of Platform")
 
         self.common_parser.add_argument("--uuid", action=EnvDefault, env=environment, envvar="ROSA_BURNER_UUID")
         self.common_parser.add_argument("--path", action=EnvDefault, env=environment, envvar="ROSA_BURNER_PATH")
+
+        self.common_parser.add_argument("--static-cluster-name", action=EnvDefault, env=environment, envvar="ROSA_BURNER_STATIC_CLUSTER_NAME", type=str, help="Input used to form cluster name prefix. 10 chars max")
 
         self.common_parser.add_argument("--cluster-name-seed", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTER_NAME_SEED", type=str, help="Seed used to generate cluster names. 6 chars max")
 

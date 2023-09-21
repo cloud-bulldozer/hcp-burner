@@ -149,8 +149,8 @@ class Platform:
             cluster = json.loads(resp_out)
         except Exception as err:
             self.logging.error(f"Cannot load metadata for cluster {cluster_name}")
-            self.logging.error(err)        
-        metadata = {}           
+            self.logging.error(err)
+        metadata = {}
         metadata['cluster_name'] = cluster.get("name", None)
         metadata['infra_id'] = cluster.get("infra_id", None)
         metadata['cluster_id'] = cluster.get("id", None)

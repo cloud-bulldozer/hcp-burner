@@ -204,8 +204,8 @@ class Utils:
         load_env["WORKLOAD"] = platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
         if not self.force_terminate:
-            load_code, load_out, load_err = self.subprocess_exec(platform.environment['load']['script'], my_path + '/cluster_load.log', extra_params={'cwd': my_path + "/workload", 'env': load_env})
+            load_code, load_out, load_err = self.subprocess_exec('./run.sh', my_path + '/cluster_load.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': load_env})
             if load_code != 0:
-                self.logging.error(f"Failed to execute workload {platform.environment['load']['script']} on {cluster_name}")
+                self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/run.sh'} on {cluster_name}")
         else:
             self.logging.warning(f"Not starting workload on {cluster_name} after capturing Ctrl-C")

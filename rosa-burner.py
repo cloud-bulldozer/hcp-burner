@@ -66,7 +66,7 @@ if __name__ == "__main__":
                 raise
     watcher.join()
 
-    if str(platform.environment['load']).lower() == "true":
+    if 'enabled' in platform.environment['load'] and str(platform.environment['load']['enabled']).lower() == "true":
         # Prometheus takes a lot of time to start after all nodes are ready. we maybe needs to increase this sleep in the future
         logging.info("Waiting 5 minutes to allow all clusters to create all pods")
         time.sleep(300)

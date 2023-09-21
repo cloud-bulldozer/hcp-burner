@@ -94,6 +94,14 @@ class Hypershift(Rosa):
         self.logging.error(f"No Provision Shard found for Service Cluster {self.environment['service_cluster']} on {self.environment['aws']['region']}")
         return None
 
+    def _get_mc(self, cluster_id):
+        self.logging.debug(f"Get the mgmt cluster of cluster {cluster_id}")
+        resp_code, resp_out, resp_err = self.utils.subprocess_exec(
+            "ocm get /api/clusters_mgmt/v1/clusters/" + cluster_id + "/hypershift",
+            extra_params={"universal_newlines": True},
+        )
+        return json.loads(resp_out).get("management_cluster", None) if resp_code == 0 else None
+
     def platform_cleanup(self):
         super().platform_cleanup()
         self.logging.info("Cleaning resources")
@@ -357,10 +365,13 @@ class Hypershift(Rosa):
     def delete_cluster(self, platform, cluster_name):
         super().delete_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
-        cluster_start_time = int(time.time())
+        cluster_start_time = int(datetime.datetime.utcnow().timestamp())
+        cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["install_method"] = "rosa"
+        cluster_info["mgmt_cluster_name"] = self._get_mc(cluster_info["metadata"]["cluster_id"])
         self.logging.info(f"Deleting cluster {cluster_name} on Hypershift Platform")
         cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("rosa delete cluster -c " + cluster_name + " -y --watch", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
-        cluster_delete_end_time = int(time.time())
+        cluster_delete_end_time = int(datetime.datetime.utcnow().timestamp())
         if cleanup_code == 0:
             self.logging.debug(
                 f"Confirm cluster {cluster_name} deleted by attempting to describe the cluster. This should fail if the cluster is removed."
@@ -386,7 +397,7 @@ class Hypershift(Rosa):
                 cluster_info["status"] = "not deleted"
         else:
             cluster_info["status"] = "not deleted"
-        cluster_end_time = int(time.time())
+        cluster_end_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["destroy_duration"] = cluster_delete_end_time - cluster_start_time
         cluster_info["destroy_all_duration"] = cluster_end_time - cluster_start_time
         try:
@@ -402,6 +413,9 @@ class Hypershift(Rosa):
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
+        cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["hostedclusters"] = self.environment["cluster_count"]
+        cluster_info["install_method"] = "rosa"
         self.logging.info(f"Creating cluster {cluster_info['index']} on Hypershift with name {cluster_name} and {cluster_info['workers']} workers")
         cluster_info["path"] = platform.environment["path"] + "/" + cluster_name
         os.mkdir(cluster_info["path"])
@@ -422,7 +436,7 @@ class Hypershift(Rosa):
         if self.environment["common_operator_roles"]:
             cluster_cmd.append("--operator-roles-prefix")
             cluster_cmd.append(self.environment["common_operator_roles"])
-        cluster_start_time = int(time.time())
+        cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         self.logging.info(f"Trying to install cluster {cluster_name} with {cluster_info['workers']} workers up to 5 times")
         trying = 0
         while trying <= 5:
@@ -441,7 +455,7 @@ class Hypershift(Rosa):
                     self.logging.warning(f"Try: {trying}/5. Cluster {cluster_name} installation failed, retrying in 15 seconds")
                     time.sleep(15)
                 else:
-                    cluster_end_time = int(time.time())
+                    cluster_end_time = int(datetime.datetime.utcnow().timestamp())
                     cluster_info["status"] = "Not Installed"
                     self.logging.error(f"Cluster {cluster_name} installation failed after 5 retries")
                     self.logging.debug(create_cluster_out)
@@ -457,34 +471,33 @@ class Hypershift(Rosa):
             sc_namespace = executor.submit(self._namespace_wait, platform.environment["sc_kubeconfig"], cluster_info["metadata"]["cluster_id"], cluster_name, "Service") if platform.environment["sc_kubeconfig"] != "" else 0
             cluster_info["preflight_checks"] = preflight_ch.result()
             cluster_info["sc_namespace_timing"] = sc_namespace.result() - cluster_start_time if platform.environment["sc_kubeconfig"] != "" else None
-        # Waiting until OCM-2495 will be completed
-        # mgmt_cluster_name = _get_mgmt_cluster(sc_kubeconfig, metadata['cluster_id'], cluster_name) if sc_kubeconfig != "" else None
-        # mgmt_metadata = _get_mgmt_cluster_info(ocm_cmnd, mgmt_cluster_name, es, index, index_retry, uuid) if mgmt_cluster_name else None
-        # mgmt_kubeconfig_path = _download_kubeconfig(ocm_cmnd, mgmt_metadata['cluster_id'], cluster_path, "mgmt") if mgmt_cluster_name else None
-        # mc_namespace_timing = _namespace_wait(mgmt_kubeconfig_path, metadata['cluster_id'], cluster_name, "Management") - cluster_start_time if mgmt_kubeconfig_path else 0
-        # metadata['mgmt_namespace'] = mc_namespace_timing
+
+            mgmt_cluster_name = self._get_mc(cluster_info["metadata"]["cluster_id"])
+            self.environment["mc_kubeconfig"] = self.download_kubeconfig(mgmt_cluster_name, self.environment["path"])
+            mc_namespace = executor.submit(self._namespace_wait, platform.environment["mc_kubeconfig"], cluster_info["metadata"]["cluster_id"], cluster_name, "Management") if platform.environment["mc_kubeconfig"] != "" else 0
+            cluster_info["mc_namespace_timing"] = mc_namespace.result() - cluster_start_time if platform.environment["mc_kubeconfig"] != "" else None
         watch_code, watch_out, watch_err = self.utils.subprocess_exec("rosa logs install -c " + cluster_name + " --watch", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals})
         if watch_code != 0:
             cluster_info['status'] = "not ready"
             return 1
         else:
             cluster_info['status'] = "installed"
-            cluster_end_time = int(time.time())
+            cluster_end_time = int(datetime.datetime.utcnow().timestamp())
             # Getting againg metadata to update the cluster status
             cluster_info["metadata"] = self.get_metadata(cluster_name)
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
             access_timers = self.get_cluster_admin_access(cluster_name, cluster_info["path"])
             cluster_info["kubeconfig"] = access_timers.get("kubeconfig", None)
-            cluster_info["cluster-admin-create"] = access_timers.get("cluster-admin-create", None)
-            cluster_info["cluster-admin-login"] = access_timers.get("cluster-admin-login", None)
-            cluster_info["cluster-oc-adm"] = access_timers.get("cluster-oc-adm", None)
+            cluster_info["cluster_admin_create"] = access_timers.get("cluster_admin_create", None)
+            cluster_info["cluster_admin_login"] = access_timers.get("cluster_admin_login", None)
+            cluster_info["cluster_oc_adm"] = access_timers.get("cluster_oc_adm", None)
             if not cluster_info["kubeconfig"]:
                 self.logging.error(f"Failed to download kubeconfig file for cluster {cluster_name}. Disabling wait for workers and workload execution")
                 cluster_info["workers_wait_time"] = None
                 cluster_info["status"] = "Ready. Not Access"
                 return 1
             if "extra_machinepool" in platform.environment:
-                extra_machine_pool_start_time = int(time.time())
+                extra_machine_pool_start_time = int(datetime.datetime.utcnow().timestamp())
                 self.add_machinepool(cluster_name, cluster_info["metadata"]["cluster_id"], cluster_info["metadata"]["zones"], platform.environment["extra_machinepool"])
             if cluster_info["workers_wait_time"]:
                 with concurrent.futures.ThreadPoolExecutor() as wait_executor:
@@ -509,7 +522,8 @@ class Hypershift(Rosa):
                                 cluster_info['status'] = "Ready, missing extra pool workers"
                                 return 1
             cluster_info['status'] = "ready"
-            # cluster_info['mgmt_cluster_name'] = mgmt_cluster_name
+            cluster_info["mgmt_cluster_name"] = mgmt_cluster_name
+            cluster_info["metadata"]["mgmt_cluster"] = self.get_ocm_cluster_info(mgmt_cluster_name)
             # metadata['job_iterations'] = str(job_iterations) if cluster_load else 0
             # metadata['load_duration'] = load_duration if cluster_load else ""
             try:
@@ -537,7 +551,7 @@ class Hypershift(Rosa):
                 #     _get_mgmt_cluster_must_gather(mgmt_kubeconfig_path, path)
 
     def _namespace_wait(self, kubeconfig, cluster_id, cluster_name, type):
-        start_time = int(time.time())
+        start_time = int(datetime.datetime.utcnow().timestamp())
         self.logging.info(
             f"Capturing namespace creation time on {type} Cluster for {cluster_name}. Waiting 30 minutes until datetime.datetime.fromtimestamp(start_time + 30 * 60)"
         )
@@ -580,7 +594,7 @@ class Hypershift(Rosa):
                 if (type == "Service" and namespace_count == 2) or (
                     type == "Management" and namespace_count == 3
                 ):
-                    end_time = int(time.time())
+                    end_time = int(datetime.datetime.utcnow().timestamp())
                     self.logging.info(
                         f"Namespace for {cluster_name} created in {type} Cluster at {datetime.datetime.fromtimestamp(end_time)}"
                     )

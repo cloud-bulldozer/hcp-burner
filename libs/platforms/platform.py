@@ -62,10 +62,10 @@ class Platform:
 
         self.environment['load'] = {}
         if arguments['enable_workload']:
-            self.environment['load']["enabled"] = "true"
+            self.environment['load']['enabled'] = "true"
             self.environment['load']["workload"] = arguments["workload"]
             self.environment['load']["repo"] = arguments["workload_repo"]
-            self.environment['load']["script"] = arguments["workload_script"]
+            self.environment['load']["script_path"] = arguments["workload_script_path"]
             self.environment['load']["executor"] = arguments["workload_executor"]
             self.environment['load']['duration'] = arguments['workload_duration']
             self.environment['load']['jobs'] = arguments['workload_jobs']
@@ -149,6 +149,34 @@ class Platform:
         )
         return json.loads(describe_out).get("id", None) if describe_code == 0 else None
 
+    def get_ocm_cluster_info(self, cluster_name):
+        self.logging.info(f"Get Cluster metadata of {cluster_name}")
+        resp_code, resp_out, resp_err = self.utils.subprocess_exec(
+                "ocm get cluster " + self.get_cluster_id(cluster_name),
+                extra_params={"universal_newlines": True},
+        )
+        try:
+            cluster = json.loads(resp_out)
+        except Exception as err:
+            self.logging.error(f"Cannot load metadata for cluster {cluster_name}")
+            self.logging.error(err)
+        metadata = {}
+        metadata['cluster_name'] = cluster.get("name", None)
+        metadata['infra_id'] = cluster.get("infra_id", None)
+        metadata['cluster_id'] = cluster.get("id", None)
+        metadata['version'] = cluster.get("openshift_version", None)
+        metadata['base_domain'] = cluster.get("dns", {}).get("base_domain", None)
+        metadata['aws_region'] = cluster.get("region", {}).get("id", None)
+        if 'compute' in cluster.get("nodes", {}):
+            metadata['workers'] = cluster.get("nodes", {}).get("compute", None)
+        else:  # when autoscaling enabled
+            metadata['workers'] = cluster.get("nodes", {}).get("autoscale_compute", {}).get("min_replicas", None)
+            metadata['workers_min'] = cluster.get("nodes", {}).get("autoscale_compute", {}).get("min_replicas", None)
+            metadata['workers_max'] = cluster.get("nodes", {}).get("autoscale_compute", {}).get("max_replicas", None)
+        metadata['workers_type'] = cluster.get("nodes", {}).get("compute_machine_type", {}).get("id", None)
+        metadata['network_type'] = cluster.get("network", {}).get("type", None)
+        return metadata
+
     def _wait_for_workers(
         self, kubeconfig, worker_nodes, wait_time, cluster_name, machinepool_name
     ):
@@ -210,7 +238,7 @@ class Platform:
                     f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Stopping wait."
                 )
                 result.append(ready_nodes)
-                result.append(int(time.time()))
+                result.append(int(datetime.datetime.utcnow().timestamp()))
                 return result
             else:
                 self.logging.info(

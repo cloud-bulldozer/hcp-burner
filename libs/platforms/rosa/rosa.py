@@ -254,7 +254,7 @@ class Rosa(Platform):
 
     def _preflight_wait(self, cluster_id, cluster_name):
         return_data = {}
-        start_time = int(time.time())
+        start_time = int(datetime.datetime.utcnow().timestamp())
         previous_status = ""
         self.logging.info(f"Collecting preflight times for cluster {cluster_name} during 60 minutes until {datetime.datetime.fromtimestamp(start_time + 60 * 60)}")
         # Waiting 1 hour for preflight checks to end
@@ -264,7 +264,7 @@ class Rosa(Platform):
                 return 0
             self.logging.info(f"Getting status for cluster {cluster_name}")
             status_code, status_out, status_err = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_id + " -o json", extra_params={"universal_newlines": True})
-            current_time = int(time.time())
+            current_time = int(datetime.datetime.utcnow().timestamp())
             try:
                 current_status = json.loads(status_out)["state"]
             except Exception as err:
@@ -286,7 +286,7 @@ class Rosa(Platform):
         return return_data
 
     def get_cluster_admin_access(self, cluster_name, path):
-        cluster_admin_create_time = int(time.time())
+        cluster_admin_create_time = int(datetime.datetime.utcnow().timestamp())
         return_data = {}
         self.logging.info(f"Creating cluster-admin user on cluster {cluster_name} (30 minutes timeout)")
         rosa_create_admin_debug_log = open(path + "/" + "rosa_create_admin_debug.log", "w")
@@ -307,9 +307,9 @@ class Rosa(Platform):
                 self.logging.warning(f"Waiting 5 seconds for the next try on {cluster_name} until {datetime.datetime.fromtimestamp(cluster_admin_create_time + 30 * 60)}")
                 time.sleep(5)
             else:
-                oc_login_time = int(time.time())
+                oc_login_time = int(datetime.datetime.utcnow().timestamp())
                 self.logging.info(f"cluster-admin user creation succesfull on cluster {cluster_name}")
-                return_data["cluster-admin-create"] = (int(time.time()) - cluster_admin_create_time)
+                return_data["cluster_admin_create"] = (int(datetime.datetime.utcnow().timestamp()) - cluster_admin_create_time)
                 self.logging.info(f"Trying to login on cluster {cluster_name} (30 minutes timeout until {datetime.datetime.fromtimestamp(oc_login_time + 30 * 60)}, 5s timeout on oc command)")
                 start_json = stdout.find("{")
                 while datetime.datetime.utcnow().timestamp() < oc_login_time + 30 * 60:
@@ -324,9 +324,9 @@ class Rosa(Platform):
                         self.logging.debug(f"Waiting 5 seconds until {datetime.datetime.fromtimestamp(oc_login_time + 30 * 60)} for the next try on {cluster_name}")
                         time.sleep(5)
                     else:
-                        oc_adm_time_start = int(time.time())
+                        oc_adm_time_start = int(datetime.datetime.utcnow().timestamp())
                         self.logging.info("Login succesfull on cluster %s" % cluster_name)
-                        return_data["cluster-admin-login"] = (int(time.time()) - oc_login_time)
+                        return_data["cluster_admin_login"] = (int(datetime.datetime.utcnow().timestamp()) - oc_login_time)
                         return_data["kubeconfig"] = path + "/kubeconfig"
                         myenv = os.environ.copy()
                         myenv["KUBECONFIG"] = return_data["kubeconfig"]
@@ -356,8 +356,8 @@ class Rosa(Platform):
                                     "Verified admin access to %s, using %s kubeconfig file."
                                     % (cluster_name, path + "/kubeconfig")
                                 )
-                                return_data["cluster-oc-adm"] = (
-                                    int(time.time()) - oc_adm_time_start
+                                return_data["cluster_oc_adm"] = (
+                                    int(datetime.datetime.utcnow().timestamp()) - oc_adm_time_start
                                 )
                                 return return_data
                         self.logging.error(

@@ -22,7 +22,7 @@ class Rosa(Platform):
         aws.set_aws_envvars(arguments['aws_profile'], arguments['aws_region'])
         self.environment['aws'] = aws.set_aws_environment(arguments['aws_profile'], arguments['aws_region'])
         self.environment["commands"].append("rosa")
-        # self.environment["commands"].append("aws")
+        self.environment["commands"].append("aws")
 
         self.environment["rosa_env"] = arguments["rosa_env"]
 

@@ -50,10 +50,11 @@ class Utils:
         return cluster_name_seed
 
     def verify_cmnd(self, command):
-        (cmd_code, cmd_out, cmd_err) = self.subprocess_exec(command + " -h")
+        help_command = command + " help" if command != "terraform" else command + " -h"
+        (cmd_code, cmd_out, cmd_err) = self.subprocess_exec(help_command)
         if cmd_code != 0:
-            self.logging(cmd_out)
-            self.logging(cmd_err)
+            self.logging.error(cmd_out)
+            self.logging.error(cmd_err)
             sys.exit("Exiting...")
         else:
             self.logging.info(f"{command} command validated with -h")

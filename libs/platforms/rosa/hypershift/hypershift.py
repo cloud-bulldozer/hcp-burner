@@ -410,6 +410,16 @@ class Hypershift(Rosa):
             cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
             self.es.index_metadata(cluster_info)
 
+    def _get_aws_role_name(self, cluster_name):
+        # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
+        (role_policy_code, role_policy_out, role_policy_err) = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_name + " -o json")
+        if role_policy_code == 0:
+            for role in json.loads(role_policy_out.decode("utf-8")).get("aws", {}).get("sts", {}).get("operator_iam_roles", []):
+                if role.get("name", "") == "kube-controller-manager":
+                    return role.get("role_arn").split("/")[-1]
+        self.logging.error(f"No Role named kube-controller-manager found on Cluster {cluster_name}")
+        return None
+
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
@@ -462,6 +472,18 @@ class Hypershift(Rosa):
                     return 1
             else:
                 break
+
+        # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
+        self.logging.info(f"Getting kube-controller-manager role for cluster {cluster_name}")
+        aws_role_name = self._get_aws_role_name(cluster_name)
+        self.logging.info(f"Found kube-controller-manager role {aws_role_name} for cluster {cluster_name}")
+        (aws_policy_code, aws_policy_out, aws_policy_err) = self.utils.subprocess_exec("aws iam attach-role-policy --role-name " + aws_role_name + " --policy-arn arn:aws:iam::415909267177:policy/hack-414-custom-policy")
+        if aws_policy_code != 0:
+            cluster_info['status'] = "aws policy failed"
+            return 1
+        else:
+            self.logging.info(f"Patched kube-controller-manager role {aws_role_name} for cluster {cluster_name} with policy arn:aws:iam::415909267177:policy/hack-414-custom-policy")
+
         cluster_info['status'] = "Installing"
         self.logging.info(f"Cluster {cluster_name} installation started on the {trying} try")
         cluster_info["metadata"] = self.get_metadata(cluster_name)

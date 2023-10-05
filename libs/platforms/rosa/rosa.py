@@ -204,6 +204,103 @@ class Rosa(Platform):
 
     def watcher(self):
         super().watcher()
+        self.logging.info(f"Watcher started on {self.environment['platform']}")
+        self.logging.info(f"Getting status every {self.environment['watcher_delay']}")
+        self.logging.info(f"Expected Clusters_ {self.environment['cluster_count']}")
+        self.logging.info(
+            f"Manually terminate watcher creating the file {self.environment['path']}/terminate_watcher"
+        )
+        file_path = os.path.join(self.environment["path"], "terminate_watcher")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        while not self.utils.force_terminate:
+            self.logging.debug(self.environment['clusters'])
+            if os.path.isfile(
+                os.path.join(self.environment["path"], "terminate_watcher")
+            ):
+                self.logging.warning("Watcher has been manually set to terminate")
+                break
+
+            (
+                cluster_list_code,
+                cluster_list_out,
+                cluster_list_err,
+            ) = self.utils.subprocess_exec(
+                "rosa list clusters -o json", extra_params={"universal_newlines": True}
+            )
+            current_cluster_count = 0
+            installed_clusters = 0
+            clusters_with_all_workers = 0
+            state = {}
+            error = []
+            try:
+                rosa_list_clusters = json.loads(cluster_list_out)
+            except ValueError as err:
+                self.logging.error("Failed to get clusters list: %s" % err)
+                self.logging.error(cluster_list_out)
+                self.logging.error(cluster_list_err)
+                rosa_list_clusters = {}
+            for cluster in rosa_list_clusters:
+                if (
+                    "name" in cluster
+                    and self.environment["cluster_name_seed"] in cluster["name"]
+                ):
+                    current_cluster_count += 1
+                    state_key = cluster["state"] if "state" in cluster else ""
+                    if state_key == "error":
+                        error.append(cluster["name"])
+                    elif state_key == "ready":
+                        state[state_key] = state.get(state_key, 0) + 1
+                        installed_clusters += 1
+                        required_workers = cluster["nodes"]["compute"]
+                        ready_workers = self._get_workers_ready(
+                            self.environment["path"]
+                            + "/"
+                            + cluster["name"]
+                            + "/kubeconfig",
+                            cluster["name"],
+                        )
+                        if ready_workers == required_workers:
+                            clusters_with_all_workers += 1
+                    elif state_key != "":
+                        state[state_key] = state.get(state_key, 0) + 1
+            self.logging.info(
+                "Requested Clusters for test %s: %d of %d"
+                % (
+                    self.environment["uuid"],
+                    current_cluster_count,
+                    self.environment["cluster_count"],
+                )
+            )
+            state_output = ""
+            for i in state.items():
+                state_output += "(" + str(i[0]) + ": " + str(i[1]) + ") "
+                self.logging.info(state_output)
+            if error:
+                self.logging.warning("Clusters in error state: %s" % error)
+            if installed_clusters == self.environment["cluster_count"]:
+                # All clusters ready
+                if self.environment["wait_for_workers"]:
+                    if clusters_with_all_workers == self.environment["cluster_count"]:
+                        self.logging.info(
+                            "All clusters on ready status and all clusters with all workers ready. Exiting watcher"
+                        )
+                        break
+                    else:
+                        self.logging.info(
+                            f"Waiting {self.environment['watcher_delay']} seconds for next watcher run"
+                        )
+                        time.sleep(self.environment["watcher_delay"])
+                else:
+                    self.logging.info("All clusters on ready status. Exiting watcher")
+                    break
+            else:
+                self.logging.info(
+                    f"Waiting {self.environment['watcher_delay']} seconds for next watcher run"
+                )
+                time.sleep(self.environment["watcher_delay"])
+        self.logging.debug(self.environment['clusters'])
+        self.logging.info("Watcher terminated")        
 
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)

@@ -60,6 +60,8 @@ class Platform:
         else:
             self.environment["install_clusters"] = False
 
+        self.environment["install_method"] = arguments["install_method"]
+
         self.environment['load'] = {}
         if arguments['enable_workload']:
             self.environment['load']['enabled'] = "true"

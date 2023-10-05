@@ -45,15 +45,16 @@ class Classic(Rosa):
         else:
             cmd_path = cmd_path + "/terraform"
             shutil.copytree(sys.path[0] + "/libs/platforms/rosa/classic/terraform", cmd_path)
+            cmd_env["TF_VAR_cluster_name"] = cluster_name
             cmd_env["TF_VAR_token"] = self.environment["ocm_token"]
-            cmd_env["TF_VAR_availability_zones"] = "['"+ os.environ["AWS_REGION"] +"a']" # us-west-2a
+            cmd_env["TF_VAR_availability_zones"] = '["'+ os.environ["AWS_REGION"] +'a"]' # us-west-2a
             cmd_env["TF_VAR_cloud_region"] = os.environ["AWS_REGION"]
             cmd_env["TF_VAR_url"] = self.environment["ocm_url"]
             cmd_env["TF_VAR_operator_role_prefix"] = cluster_name
             cmd_env["TF_VAR_account_role_prefix"] = "ManagedOpenShift"
             init_code, init_out, init_err = self.utils.subprocess_exec("terraform init", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals, 'cwd': cmd_path, 'env': cmd_env})
             plan_code, plan_out, plan_err = self.utils.subprocess_exec("terraform plan -out rosa-cluster.tfplan", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals, 'cwd': cmd_path, 'env': cmd_env})
-            cluster_cmd = ["terraform", "apply", "rosa-cluster.tfplan", "--auto-approve"]
+            cluster_cmd = ["terraform", "apply", "--auto-approve"]
             # cmd_env["TF_VAR_openshift_version"] = 
         if platform.environment["wildcard_options"]:
             for param in platform.environment["wildcard_options"].split():
@@ -160,8 +161,9 @@ class Classic(Rosa):
         else:
             cmd_path = cluster_info["path"] + "/" + "terraform"
             cmd_env = os.environ.copy()
+            cmd_env["TF_VAR_cluster_name"] = cluster_name
             cmd_env["TF_VAR_token"] = self.environment["ocm_token"]
-            cmd_env["TF_VAR_availability_zones"] = "['"+ os.environ["AWS_REGION"] +"a']" # us-west-2a
+            cmd_env["TF_VAR_availability_zones"] = '["'+ os.environ["AWS_REGION"] +'a"]' # us-west-2a
             cmd_env["TF_VAR_cloud_region"] = os.environ["AWS_REGION"]
             cmd_env["TF_VAR_url"] = self.environment["ocm_url"]
             cmd_env["TF_VAR_operator_role_prefix"] = cluster_name

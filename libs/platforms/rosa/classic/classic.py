@@ -52,6 +52,7 @@ class Classic(Rosa):
             cmd_env["TF_VAR_url"] = self.environment["ocm_url"]
             cmd_env["TF_VAR_operator_role_prefix"] = cluster_name
             cmd_env["TF_VAR_account_role_prefix"] = "ManagedOpenShift"
+            cmd_env["TF_VAR_compute_machine_type"] = "t3a.xlarge"
             init_code, init_out, init_err = self.utils.subprocess_exec("terraform init", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals, 'cwd': cmd_path, 'env': cmd_env})
             plan_code, plan_out, plan_err = self.utils.subprocess_exec("terraform plan -out rosa-cluster.tfplan", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals, 'cwd': cmd_path, 'env': cmd_env})
             cluster_cmd = ["terraform", "apply", "--auto-approve"]
@@ -168,6 +169,7 @@ class Classic(Rosa):
             cmd_env["TF_VAR_url"] = self.environment["ocm_url"]
             cmd_env["TF_VAR_operator_role_prefix"] = cluster_name
             cmd_env["TF_VAR_account_role_prefix"] = "ManagedOpenShift"
+            cmd_env["TF_VAR_compute_machine_type"] = "t3a.xlarge"
             cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("terraform destroy --auto-approve", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals, 'cwd': cmd_path, 'env': cmd_env})
         cluster_delete_end_time = int(datetime.datetime.utcnow().timestamp())
         if cleanup_code == 0:

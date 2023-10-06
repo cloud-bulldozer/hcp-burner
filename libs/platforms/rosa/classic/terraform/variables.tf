@@ -39,3 +39,8 @@ variable "tags" {
   type        = map(string)
   default     = null
 }
+
+variable "compute_machine_type" {
+  type    = string
+  default = "m5.2xlarge"
+}

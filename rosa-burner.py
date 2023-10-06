@@ -84,8 +84,7 @@ if __name__ == "__main__":
                     raise
 
     if str(platform.environment["cleanup_clusters"]).lower() == "true":
-        if len(platform.environment['clusters']) < 1:
-            platform = utils.get_cluster_info(platform)
+        platform = utils.get_cluster_info(platform)
         delete_threads = utils.cleanup_scheduler(platform)
         logging.info(f"{len(delete_threads)} threads created for deleting clusters. Waiting for them to finish")
         for thread in delete_threads:

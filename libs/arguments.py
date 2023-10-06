@@ -5,9 +5,9 @@ Module to set common arguments used by all platforms, and import Arguments for e
 """
 import argparse
 import configparser
-import re
 import importlib
 import sys
+import re
 from libs.elasticsearch import ElasticArguments
 from libs.logging import LoggingArguments
 
@@ -35,7 +35,7 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--cluster-name-seed", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTER_NAME_SEED", type=str, help="Seed used to generate cluster names. 6 chars max")
 
-        self.common_parser.add_argument("--workers", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKERS", type=self._verify_workers, default="3",
+        self.common_parser.add_argument("--workers", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKERS", type=str, default="3",
                                         help="Number of workers for the hosted cluster (min: 3). If list (comma separated), iteration over the list until reach number of clusters")
         self.common_parser.add_argument("--workers-wait-time", type=int, default=60, action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKERS_WAIT_TIME",
                                         help="Waiting time in minutes for the workers to be Ready after cluster installation or machinepool creation . If 0, do not wait. Default: 60 minutes")

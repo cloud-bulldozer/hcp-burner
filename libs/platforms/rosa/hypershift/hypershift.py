@@ -557,6 +557,10 @@ class Hypershift(Rosa):
             if self.es is not None:
                 cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
                 self.es.index_metadata(cluster_info)
+                self.logging.info(f"Indexing Management cluster stats")
+                os.environ["START_TIME"] = cluster_start_time
+                os.environ["END_TIME"] = cluster_end_time
+                self.utils.cluster_load(platform, cluster_name, load="index")
             # if cluster_load:
                 #     with all_clusters_installed:
                 #         logging.info('Waiting for all clusters to be installed to start e2e-benchmarking execution on %s' % cluster_name)

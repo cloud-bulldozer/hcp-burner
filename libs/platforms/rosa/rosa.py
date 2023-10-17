@@ -408,7 +408,7 @@ class Rosa(Platform):
                 machinepool_cmd.append("--labels")
                 machinepool_cmd.append(machinepool["labels"])
             if machinepool["taints"]:
-                machinepool_cmd.append("--tains")
+                machinepool_cmd.append("--taints")
                 machinepool_cmd.append(machinepool["taints"])
             (
                 machinepool_code,

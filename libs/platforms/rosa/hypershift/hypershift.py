@@ -498,7 +498,7 @@ class Hypershift(Rosa):
             self.environment["mc_kubeconfig"] = self.download_kubeconfig(mgmt_cluster_name, self.environment["path"])
             mc_namespace = executor.submit(self._namespace_wait, platform.environment["mc_kubeconfig"], cluster_info["metadata"]["cluster_id"], cluster_name, "Management") if platform.environment["mc_kubeconfig"] != "" else 0
             cluster_info["mc_namespace_timing"] = mc_namespace.result() - cluster_start_time if platform.environment["mc_kubeconfig"] != "" else None
-        cluster_start_time_on_mc=mc_namespace.result()
+        cluster_start_time_on_mc = mc_namespace.result()
         watch_code, watch_out, watch_err = self.utils.subprocess_exec("rosa logs install -c " + cluster_name + " --watch", cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals})
         if watch_code != 0:
             cluster_info['status'] = "not ready"
@@ -558,8 +558,8 @@ class Hypershift(Rosa):
             if self.es is not None:
                 cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
                 self.es.index_metadata(cluster_info)
-                self.logging.info(f"Indexing Management cluster stats")
-                os.environ["START_TIME"] = f"{cluster_start_time_on_mc}" # excludes pre-flight durations
+                self.logging.info("Indexing Management cluster stats")
+                os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
                 os.environ["END_TIME"] = f"{cluster_end_time}"
                 self.utils.cluster_load(platform, cluster_name, load="index")
             # if cluster_load:

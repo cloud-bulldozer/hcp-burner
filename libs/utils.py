@@ -201,13 +201,14 @@ class Utils:
             self.logging.error("Thread creation failed")
         return cluster_thread_list
 
-    def cluster_load(self, platform, cluster_name):
+    def cluster_load(self, platform, cluster_name, load=""):
         load_env = os.environ.copy()
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
         load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
-        self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
-        Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
+        if not os.path.exists(my_path + '/workload'):
+            self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
+            Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
         # Copy executor to the local folder because we shaw in the past that we cannot use kube-burner with multiple executions at the same time
         shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
@@ -215,10 +216,11 @@ class Utils:
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"
-        load_env["WORKLOAD"] = platform.environment['load']['workload']
+        load_env["WORKLOAD"] = load if load != "" else platform.environment['load']['workload']
+        log_file = load if load != "" else platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
         if not self.force_terminate:
-            load_code, load_out, load_err = self.subprocess_exec('./run.sh', my_path + '/cluster_load.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': load_env})
+            load_code, load_out, load_err = self.subprocess_exec('./run.sh', my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': load_env})
             if load_code != 0:
                 self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/run.sh'} on {cluster_name}")
         else:

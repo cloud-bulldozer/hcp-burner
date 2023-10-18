@@ -425,6 +425,7 @@ class Hypershift(Rosa):
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
         cluster_info["hostedclusters"] = self.environment["cluster_count"]
+        cluster_info["environment"] = self.environment["rosa_env"]
         cluster_info["install_method"] = "rosa"
         self.logging.info(f"Creating cluster {cluster_info['index']} on Hypershift with name {cluster_name} and {cluster_info['workers']} workers")
         cluster_info["path"] = platform.environment["path"] + "/" + cluster_name

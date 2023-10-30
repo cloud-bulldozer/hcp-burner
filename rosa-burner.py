@@ -30,7 +30,7 @@ if __name__ == "__main__":
             platform_module_path = "libs.platforms." + arguments["platform"] + "." + arguments["platform"]
             platform_module = importlib.import_module(platform_module_path)
             PlatformClass = getattr(platform_module, arguments["platform"].capitalize())
-            platform = PlatformClass(arguments, logging, utils)
+            platform = PlatformClass(arguments, logging, utils, es)
     except ImportError as err:
         logging.error("Module not found)")
         logging.error(err)

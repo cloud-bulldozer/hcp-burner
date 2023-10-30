@@ -2,11 +2,8 @@
 # -*- coding: utf-8 -*-
 import uuid
 import sys
-import os
 import yaml
 import json
-import time
-import datetime
 import argparse
 import configparser
 
@@ -178,80 +175,8 @@ class Platform:
         metadata['network_type'] = cluster.get("network", {}).get("type", None)
         return metadata
 
-    def _wait_for_workers(
-        self, kubeconfig, worker_nodes, wait_time, cluster_name, machinepool_name
-    ):
-        self.logging.info(
-            f"Waiting {wait_time} minutes for {worker_nodes} workers to be ready on {machinepool_name} machinepool on {cluster_name}"
-        )
-        myenv = os.environ.copy()
-        myenv["KUBECONFIG"] = kubeconfig
-        result = [machinepool_name]
-        starting_time = datetime.datetime.utcnow().timestamp()
-        self.logging.debug(
-            f"Waiting {wait_time} minutes for nodes to be Ready on cluster {cluster_name} until {datetime.datetime.fromtimestamp(starting_time + wait_time * 60)}"
-        )
-        while datetime.datetime.utcnow().timestamp() < starting_time + wait_time * 60:
-            # if force_terminate:
-            #     logging.error("Exiting workers waiting on the cluster %s after capturing Ctrl-C" % cluster_name)
-            #     return []
-            self.logging.info("Getting node information for cluster %s" % cluster_name)
-            nodes_code, nodes_out, nodes_err = self.utils.subprocess_exec(
-                "oc get nodes -o json",
-                extra_params={"env": myenv, "universal_newlines": True},
-            )
-            try:
-                nodes_json = json.loads(nodes_out)
-            except Exception as err:
-                self.logging.error(
-                    f"Cannot load command result for cluster {cluster_name}. Waiting 15 seconds for next check..."
-                )
-                self.logging.error(err)
-                time.sleep(15)
-                continue
-            nodes = nodes_json["items"] if "items" in nodes_json else []
-
-            # First we find nodes which label nodePool match the machinepool name and then we check if type:Ready is on the conditions
-            ready_nodes = (
-                sum(
-                    len(
-                        list(
-                            filter(
-                                lambda x: x.get("type") == "Ready"
-                                and x.get("status") == "True",
-                                node["status"]["conditions"],
-                            )
-                        )
-                    )
-                    for node in nodes
-                    if node.get("metadata", {})
-                    .get("labels", {})
-                    .get("hypershift.openshift.io/nodePool")
-                    and machinepool_name
-                    in node["metadata"]["labels"]["hypershift.openshift.io/nodePool"]
-                )
-                if nodes
-                else 0
-            )
-
-            if ready_nodes == worker_nodes:
-                self.logging.info(
-                    f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Stopping wait."
-                )
-                result.append(ready_nodes)
-                result.append(int(datetime.datetime.utcnow().timestamp()))
-                return result
-            else:
-                self.logging.info(
-                    f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Waiting 15 seconds for next check..."
-                )
-                time.sleep(15)
-        self.logging.error(
-            f"Waiting time expired. After {wait_time} minutes there are {ready_nodes}/{worker_nodes} ready nodes on {machinepool_name} machinepool for cluster {cluster_name}"
-        )
-        result.append(ready_nodes)
-        result.append("")
-        return result
+    def get_workers_ready(self, kubeconfig, cluster_name):
+        pass
 
     def create_cluster(self, platform, cluster_name):
         pass

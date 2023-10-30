@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import sys
 import json
+import re
 import os
 import time
 import datetime
@@ -17,6 +18,17 @@ from libs.platforms.rosa.rosa import RosaArguments
 class Hypershift(Rosa):
     def __init__(self, arguments, logging, utils, es):
         super().__init__(arguments, logging, utils, es)
+
+        pattern = re.compile(r"^(\d+)(,\s*\d+)*$")
+        if arguments["workers"].isdigit() and int(arguments["workers"]) % 3 != 0:
+            self.logging.error(f"Invalid value ({arguments['workers']}) for parameter  `--workers`. If digit, it must be divisible by 3'")
+        elif bool(pattern.match(arguments["workers"])):
+            for num in arguments["workers"].split(","):
+                if int(num) < 3 or int(num) % 3 != 0:
+                    self.logging.error(f"Invalid value ({num}) for parameter `--workers`. If list, all values must be divisible by 3")
+                    sys.exit("Exiting...")
+
+        self.environment["workers"] = arguments["workers"]
 
         self.environment["service_cluster"] = arguments["service_cluster"]
 
@@ -262,106 +274,6 @@ class Hypershift(Rosa):
         )
         return 1
 
-    def watcher(self):
-        super().watcher()
-        self.logging.info(f"Watcher started on {self.environment['platform']}")
-        self.logging.info(f"Getting status every {self.environment['watcher_delay']}")
-        self.logging.info(f"Expected Clusters_ {self.environment['cluster_count']}")
-        self.logging.info(
-            f"Manually terminate watcher creating the file {self.environment['path']}/terminate_watcher"
-        )
-        file_path = os.path.join(self.environment["path"], "terminate_watcher")
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        while not self.utils.force_terminate:
-            self.logging.debug(self.environment['clusters'])
-            if os.path.isfile(
-                os.path.join(self.environment["path"], "terminate_watcher")
-            ):
-                self.logging.warning("Watcher has been manually set to terminate")
-                break
-
-            (
-                cluster_list_code,
-                cluster_list_out,
-                cluster_list_err,
-            ) = self.utils.subprocess_exec(
-                "rosa list clusters -o json", extra_params={"universal_newlines": True}
-            )
-            current_cluster_count = 0
-            installed_clusters = 0
-            clusters_with_all_workers = 0
-            state = {}
-            error = []
-            try:
-                rosa_list_clusters = json.loads(cluster_list_out)
-            except ValueError as err:
-                self.logging.error("Failed to get hosted clusters list: %s" % err)
-                self.logging.error(cluster_list_out)
-                self.logging.error(cluster_list_err)
-                rosa_list_clusters = {}
-            for cluster in rosa_list_clusters:
-                if (
-                    "name" in cluster
-                    and self.environment["cluster_name_seed"] in cluster["name"]
-                ):
-                    current_cluster_count += 1
-                    state_key = cluster["state"] if "state" in cluster else ""
-                    if state_key == "error":
-                        error.append(cluster["name"])
-                    elif state_key == "ready":
-                        state[state_key] = state.get(state_key, 0) + 1
-                        installed_clusters += 1
-                        required_workers = cluster["nodes"]["compute"]
-                        ready_workers = self._get_workers_ready(
-                            self.environment["path"]
-                            + "/"
-                            + cluster["name"]
-                            + "/kubeconfig",
-                            cluster["name"],
-                        )
-                        if ready_workers == required_workers:
-                            clusters_with_all_workers += 1
-                    elif state_key != "":
-                        state[state_key] = state.get(state_key, 0) + 1
-            self.logging.info(
-                "Requested Clusters for test %s: %d of %d"
-                % (
-                    self.environment["uuid"],
-                    current_cluster_count,
-                    self.environment["cluster_count"],
-                )
-            )
-            state_output = ""
-            for i in state.items():
-                state_output += "(" + str(i[0]) + ": " + str(i[1]) + ") "
-                self.logging.info(state_output)
-            if error:
-                self.logging.warning("Clusters in error state: %s" % error)
-            if installed_clusters == self.environment["cluster_count"]:
-                # All clusters ready
-                if self.environment["wait_for_workers"]:
-                    if clusters_with_all_workers == self.environment["cluster_count"]:
-                        self.logging.info(
-                            "All clusters on ready status and all clusters with all workers ready. Exiting watcher"
-                        )
-                        break
-                    else:
-                        self.logging.info(
-                            f"Waiting {self.environment['watcher_delay']} seconds for next watcher run"
-                        )
-                        time.sleep(self.environment["watcher_delay"])
-                else:
-                    self.logging.info("All clusters on ready status. Exiting watcher")
-                    break
-            else:
-                self.logging.info(
-                    f"Waiting {self.environment['watcher_delay']} seconds for next watcher run"
-                )
-                time.sleep(self.environment["watcher_delay"])
-        self.logging.debug(self.environment['clusters'])
-        self.logging.info("Watcher terminated")
-
     def delete_cluster(self, platform, cluster_name):
         super().delete_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
@@ -419,6 +331,81 @@ class Hypershift(Rosa):
                     return role.get("role_arn").split("/")[-1]
         self.logging.error(f"No Role named kube-controller-manager found on Cluster {cluster_name}")
         return None
+
+    def _wait_for_workers(
+        self, kubeconfig, worker_nodes, wait_time, cluster_name, machinepool_name
+    ):
+        self.logging.info(
+            f"Waiting {wait_time} minutes for {worker_nodes} workers to be ready on {machinepool_name} machinepool on {cluster_name}"
+        )
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+        result = [machinepool_name]
+        starting_time = datetime.datetime.utcnow().timestamp()
+        self.logging.debug(
+            f"Waiting {wait_time} minutes for nodes to be Ready on cluster {cluster_name} until {datetime.datetime.fromtimestamp(starting_time + wait_time * 60)}"
+        )
+        while datetime.datetime.utcnow().timestamp() < starting_time + wait_time * 60:
+            # if force_terminate:
+            #     logging.error("Exiting workers waiting on the cluster %s after capturing Ctrl-C" % cluster_name)
+            #     return []
+            self.logging.info("Getting node information for cluster %s" % cluster_name)
+            nodes_code, nodes_out, nodes_err = self.utils.subprocess_exec(
+                "oc get nodes -o json",
+                extra_params={"env": myenv, "universal_newlines": True},
+            )
+            try:
+                nodes_json = json.loads(nodes_out)
+            except Exception as err:
+                self.logging.error(
+                    f"Cannot load command result for cluster {cluster_name}. Waiting 15 seconds for next check..."
+                )
+                self.logging.error(err)
+                time.sleep(15)
+                continue
+            nodes = nodes_json["items"] if "items" in nodes_json else []
+
+            # First we find nodes which label nodePool match the machinepool name and then we check if type:Ready is on the conditions
+            ready_nodes = (
+                sum(
+                    len(
+                        list(
+                            filter(
+                                lambda x: x.get("type") == "Ready"
+                                and x.get("status") == "True",
+                                node["status"]["conditions"],
+                            )
+                        )
+                    )
+                    for node in nodes
+                    if node.get("metadata", {})
+                    .get("labels", {})
+                    .get("hypershift.openshift.io/nodePool")
+                    and machinepool_name
+                    in node["metadata"]["labels"]["hypershift.openshift.io/nodePool"]
+                )
+                if nodes
+                else 0
+            )
+
+            if ready_nodes == worker_nodes:
+                self.logging.info(
+                    f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Stopping wait."
+                )
+                result.append(ready_nodes)
+                result.append(int(datetime.datetime.utcnow().timestamp()))
+                return result
+            else:
+                self.logging.info(
+                    f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Waiting 15 seconds for next check..."
+                )
+                time.sleep(15)
+        self.logging.error(
+            f"Waiting time expired. After {wait_time} minutes there are {ready_nodes}/{worker_nodes} ready nodes on {machinepool_name} machinepool for cluster {cluster_name}"
+        )
+        result.append(ready_nodes)
+        result.append("")
+        return result
 
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
@@ -637,6 +624,31 @@ class Hypershift(Rosa):
             % (cluster_name, type)
         )
         return 0
+
+    def get_workers_ready(self, kubeconfig, cluster_name):
+        super().get_workers_ready(kubeconfig, cluster_name)
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+        self.logging.info(f"Getting node information for Hypershift cluster {cluster_name}")
+        nodes_code, nodes_out, nodes_err = self.utils.subprocess_exec("oc get nodes -o json", extra_params={"env": myenv, "universal_newlines": True}, log_output=False)
+        try:
+            nodes_json = json.loads(nodes_out)
+        except Exception as err:
+            self.logging.debug(f"Cannot load command result for cluster {cluster_name}")
+            self.logging.debug(err)
+            return 0
+        nodes = nodes_json["items"] if "items" in nodes_json else []
+        status = []
+        for node in nodes:
+            nodepool = node.get("metadata", {}).get("labels", {}).get("hypershift.openshift.io/nodePool", "")
+            if "workers" in nodepool:
+                conditions = node.get("status", {}).get("conditions", [])
+                for condition in conditions:
+                    if "type" in condition and condition["type"] == "Ready":
+                        status.append(condition["status"])
+        status_list = {i: status.count(i) for i in status}
+        ready_nodes = status_list["True"] if "True" in status_list else 0
+        return ready_nodes
 
 
 class HypershiftArguments(RosaArguments):

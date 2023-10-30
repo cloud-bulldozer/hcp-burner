@@ -20,6 +20,7 @@ jobs:
       matrix:
         subplatform:
         - hypershift
+        - terraform
     steps:
 
     - name: Check out code

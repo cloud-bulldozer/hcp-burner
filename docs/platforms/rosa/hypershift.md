@@ -1,14 +1,11 @@
-# Terraform Subplatform
+Classes related to Hypershift subplatform
 
+As hypershift is a subplatform or ROSA, select rosa as platform parameter and hypershift as subplatform:
+`rosa-burner --platform rosa --subplatform hypershift`
 
-Classes related to Terraform subplatform
+### Arguments
 
-As terraform is a subplatform or ROSA, select rosa as platform parameter and terraform as subplatform:
-`rosa-burner --platform rosa --subplatform terraform`
-
-## Platforms Arguments
-
-To use the config file, define parameters related to platform under the `[Platform:Rosa:Terraform]` section
+To use the config file, define parameters related to platform under the `[Platform:Rosa:Hypershift]` section
 
 | Argument                 | Default Value     | Config file variable | Environment Variable           |
 |--------------------------|-------------------|----------------------|--------------------------------|

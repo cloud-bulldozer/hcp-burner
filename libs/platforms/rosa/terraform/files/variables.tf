@@ -23,6 +23,21 @@ variable "cluster_name" {
   default = "rbur-000-0001"
 }
 
+variable "clusters_per_apply" {
+  type    = number
+  default = null
+}
+
+variable "loop_factor" {
+  type    = number
+  default = null
+}
+
+variable "oidc_config_id" {
+  type    = string
+  default = null
+}
+
 variable "cloud_region" {
   type    = string
   default = "us-east-2"

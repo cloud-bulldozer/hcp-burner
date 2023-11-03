@@ -199,8 +199,8 @@ class Rosa(Platform):
             )
             return True
 
-    def platform_cleanup(self):
-        super().platform_cleanup()
+    def platform_cleanup(self, platform=""):
+        super().platform_cleanup(platform)
 
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
@@ -240,25 +240,28 @@ class Rosa(Platform):
                 self.logging.error(f"Exiting preflight times capturing on {cluster_name} cluster after capturing Ctrl-C")
                 return 0
             self.logging.info(f"Getting status for cluster {cluster_name}")
-            status_code, status_out, status_err = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_id + " -o json", extra_params={"universal_newlines": True})
+            status_code, status_out, status_err = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_id + " -o json", extra_params={"universal_newlines": True}, log_output=False)
             current_time = int(datetime.datetime.utcnow().timestamp())
-            try:
-                current_status = json.loads(status_out)["state"]
-            except Exception as err:
-                self.logging.error(f"Cannot load metadata for cluster {cluster_name}")
-                self.logging.error(err)
-                continue
-            if current_status != previous_status and previous_status != "":
-                return_data[previous_status] = current_time - start_time
-                start_time = current_time
-                self.logging.info(f"Cluster {cluster_name} moved from {previous_status} status to {current_status} status after {return_data[previous_status]} seconds")
-                if current_status == "installing":
-                    self.logging.info(f"Cluster {cluster_name} is on installing status. Exiting preflights waiting...")
-                    return return_data
+            if status_code != 0:
+                self.logging.debug("Cluster data not available yet, retrying..")
             else:
-                self.logging.debug(f"Cluster {cluster_name} on {current_status} status. Waiting 2 seconds until {datetime.datetime.fromtimestamp(start_time + 60 * 60)} for next check")
-                time.sleep(1)
-            previous_status = current_status
+                try:
+                    current_status = json.loads(status_out)["state"]
+                except Exception as err:
+                    self.logging.error(f"Cannot load metadata for cluster {cluster_name}")
+                    self.logging.error(err)
+                    continue
+                if current_status != previous_status and previous_status != "":
+                    return_data[previous_status] = current_time - start_time
+                    start_time = current_time
+                    self.logging.info(f"Cluster {cluster_name} moved from {previous_status} status to {current_status} status after {return_data[previous_status]} seconds")
+                    if current_status == "installing":
+                        self.logging.info(f"Cluster {cluster_name} is on installing status. Exiting preflights waiting...")
+                        return return_data
+                else:
+                    self.logging.debug(f"Cluster {cluster_name} on {current_status} status. Waiting 2 seconds until {datetime.datetime.fromtimestamp(start_time + 60 * 60)} for next check")
+                    time.sleep(1)
+                previous_status = current_status
         self.logging.error(f"Cluster {cluster_name} on {current_status} status (not installing) after 60 minutes. Exiting preflight waiting...")
         return return_data
 

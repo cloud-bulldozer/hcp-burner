@@ -31,18 +31,6 @@ provider "rhcs" {
   url   = var.url
 }
 
-# Create managed OIDC config
-module "oidc_config" {
-  token                = var.token
-  url                  = var.url
-  source               = "./oidc_provider"
-  managed              = true
-  operator_role_prefix = var.operator_role_prefix
-  account_role_prefix  = var.account_role_prefix
-  tags                 = var.tags
-  path                 = var.path
-}
-
 locals {
   path = coalesce(var.path, "/")
   sts_roles = {
@@ -53,7 +41,7 @@ locals {
       worker_role_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role${local.path}${var.account_role_prefix}-Worker-Role"
     },
     operator_role_prefix = var.operator_role_prefix,
-    oidc_config_id       = module.oidc_config.id
+    oidc_config_id       = var.oidc_config_id
   }
 }
 
@@ -65,7 +53,8 @@ locals {
 }
 
 resource "rhcs_cluster_rosa_classic" "rosa_sts_cluster" {
-  name                 = var.cluster_name
+  count                = var.clusters_per_apply
+  name                 = "${var.cluster_name}-${format("%04d", var.loop_factor + count.index + 1)}"
   cloud_region         = var.cloud_region
   aws_account_id       = data.aws_caller_identity.current.account_id
   availability_zones   = var.availability_zones
@@ -79,5 +68,6 @@ resource "rhcs_cluster_rosa_classic" "rosa_sts_cluster" {
     rosa_creator_arn = data.aws_caller_identity.current.arn
   }
   sts                      = local.sts_roles
-  wait_for_create_complete = true
+  wait_for_create_complete = false
+  disable_waiting_in_destroy = true
 }

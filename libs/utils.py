@@ -113,6 +113,9 @@ class Utils:
                     f"Waiting {platform.environment['delay_between_cleanup']} minutes before deleting the next cluster"
                 )
                 time.sleep(platform.environment["delay_between_cleanup"])
+        if platform.environment["subplatform"] and platform.environment["subplatform"] == "terraform":
+            if platform.destroy_tf_template(platform) != 0:
+                return 1
         return delete_cluster_thread_list
 
     # To form the cluster_info dict for cleanup funtions
@@ -182,7 +185,9 @@ class Utils:
                         else:
                             cluster_workers = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
                         cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
-                        platform.environment["clusters"][cluster_name] = {}
+
+                        if cluster_name not in platform.environment["clusters"]:
+                            platform.environment["clusters"][cluster_name] = {}
                         try:
                             platform.environment["clusters"][cluster_name]["workers"] = cluster_workers
                             platform.environment["clusters"][cluster_name]["workers_wait_time"] = platform.environment["workers_wait_time"]
@@ -196,6 +201,10 @@ class Utils:
                         cluster_thread_list.append(thread)
                         thread.start()
                         self.logging.debug("Number of alive threads %d" % threading.active_count())
+                        time.sleep(1)
+            if platform.environment["subplatform"] and platform.environment["subplatform"] == "terraform":
+                if platform.apply_tf_template(platform) != 0:
+                    return 1
         except Exception as err:
             self.logging.error(err)
             self.logging.error("Thread creation failed")

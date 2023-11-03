@@ -97,6 +97,6 @@ if __name__ == "__main__":
                 else:
                     raise
 
-        platform.platform_cleanup()
+        platform.platform_cleanup(platform)
 
     # utils.test_recap(platform)

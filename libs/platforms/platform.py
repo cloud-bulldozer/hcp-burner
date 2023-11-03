@@ -21,6 +21,9 @@ class Platform:
 
         self.environment["platform"] = arguments["platform"]
 
+        if arguments["subplatform"]:
+            self.environment["subplatform"] = arguments["subplatform"]
+
         self.environment["ocm_url"] = arguments["ocm_url"]
         self.environment["ocm_token"] = arguments["ocm_token"]
 
@@ -184,7 +187,7 @@ class Platform:
     def delete_cluster(self, platform, cluster_name):
         pass
 
-    def platform_cleanup(self):
+    def platform_cleanup(self, platform=""):
         pass
 
     def watcher(self):

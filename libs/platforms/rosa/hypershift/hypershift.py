@@ -114,8 +114,8 @@ class Hypershift(Rosa):
         )
         return json.loads(resp_out).get("management_cluster", None) if resp_code == 0 else None
 
-    def platform_cleanup(self):
-        super().platform_cleanup()
+    def platform_cleanup(self, platform=""):
+        super().platform_cleanup(platform)
         self.logging.info("Cleaning resources")
         # Delete Operator Roles
         self._delete_operator_roles() if self.environment[

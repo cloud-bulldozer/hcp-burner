@@ -204,7 +204,8 @@ class Utils:
                         time.sleep(1)
             if platform.environment["subplatform"] and platform.environment["subplatform"] == "terraform":
                 if platform.apply_tf_template(platform) != 0:
-                    return 1
+                    self.logging.error("Template execution failed, please check logs..")
+                    return cluster_thread_list
         except Exception as err:
             self.logging.error(err)
             self.logging.error("Thread creation failed")

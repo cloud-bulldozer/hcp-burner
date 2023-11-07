@@ -244,7 +244,6 @@ class Terraform(Rosa):
         while retry_loop <= 600:  # 1hr timeout
             retry_loop += 1
             cluster_delete_start_time = int(datetime.datetime.utcnow().timestamp())
-            index_time = datetime.datetime.utcnow().isoformat()
             watch_code, watch_out, watch_err = self.utils.subprocess_exec("rosa logs uninstall -c " + cluster_name + " --watch", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
             if watch_code != 0:
                 if retry_loop <= 600:
@@ -281,7 +280,7 @@ class Terraform(Rosa):
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
         if self.es is not None:
-            cluster_info["timestamp"] = index_time
+            cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
             self.es.index_metadata(cluster_info)
 
     def get_workers_ready(self, kubeconfig, cluster_name):
@@ -329,7 +328,6 @@ class Terraform(Rosa):
         while retry_loop <= 60:  # 10 min timeout
             retry_loop += 1
             cluster_start_time = int(datetime.datetime.utcnow().timestamp())
-            index_time = datetime.datetime.utcnow().isoformat()
             status_code, status_out, status_err = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_name + " -o json", extra_params={"universal_newlines": True}, log_output=False)
             if status_code != 0:
                 if retry_loop <= 60:
@@ -356,6 +354,7 @@ class Terraform(Rosa):
         else:
             cluster_info['status'] = "installed"
             cluster_end_time = int(datetime.datetime.utcnow().timestamp())
+            index_time = datetime.datetime.utcnow().isoformat()
             # Getting againg metadata to update the cluster status
             cluster_info["metadata"] = self.get_metadata(cluster_name)
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time

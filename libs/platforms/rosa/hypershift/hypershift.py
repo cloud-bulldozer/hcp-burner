@@ -494,6 +494,7 @@ class Hypershift(Rosa):
         else:
             cluster_info['status'] = "installed"
             cluster_end_time = int(datetime.datetime.utcnow().timestamp())
+            index_time = datetime.datetime.utcnow().isoformat()
             # Getting againg metadata to update the cluster status
             cluster_info["metadata"] = self.get_metadata(cluster_name)
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
@@ -544,7 +545,7 @@ class Hypershift(Rosa):
                 self.logging.error(err)
                 self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
             if self.es is not None:
-                cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+                cluster_info["timestamp"] = index_time
                 self.es.index_metadata(cluster_info)
                 self.logging.info("Indexing Management cluster stats")
                 os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations

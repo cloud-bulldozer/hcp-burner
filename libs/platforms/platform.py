@@ -117,9 +117,11 @@ class Platform:
             "`ocm login` execution OK"
         )
 
-    def download_kubeconfig(self, cluster_name, path):
+    def download_kubeconfig(self, cluster_name, path, kubeconfig=""):
+        if kubeconfig == "":
+            kubeconfig = "kubeconfig_" + cluster_name
         self.logging.debug(
-            f"Downloading kubeconfig file for Cluster {cluster_name} on {path}/kubeconfig_{cluster_name}"
+            f"Downloading kubeconfig file for Cluster {cluster_name} on {path}/{kubeconfig}"
         )
         kubeconfig_code, kubeconfig_out, kubeconfig_err = self.utils.subprocess_exec(
             "ocm get /api/clusters_mgmt/v1/clusters/"
@@ -134,11 +136,11 @@ class Platform:
             del kubeconfig_as_dict["clusters"][0]["cluster"][
                 "certificate-authority-data"
             ]
-            kubeconfig_path = path + "/kubeconfig_" + cluster_name
+            kubeconfig_path = path + "/" + kubeconfig
             with open(kubeconfig_path, "w") as kubeconfig_file:
                 yaml.dump(kubeconfig_as_dict, kubeconfig_file)
             self.logging.debug(
-                f"Downloaded kubeconfig file for Cluster {cluster_name} and stored at {path}/kubeconfig_{cluster_name}"
+                f"Downloaded kubeconfig file for Cluster {cluster_name} and stored at {path}/{kubeconfig}"
             )
             return kubeconfig_path
 

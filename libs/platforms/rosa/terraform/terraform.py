@@ -365,10 +365,10 @@ class Terraform(Rosa):
             cluster_info["cluster_admin_login"] = access_timers.get("cluster_admin_login", None)
             cluster_info["cluster_oc_adm"] = access_timers.get("cluster_oc_adm", None)
             if not cluster_info["kubeconfig"]:
-                self.logging.error(f"Failed to download kubeconfig file for cluster {cluster_name}. Disabling wait for workers and workload execution")
-                cluster_info["workers_wait_time"] = None
-                cluster_info["status"] = "Ready. Not Access"
-                return 1
+                self.logging.error(f"Failed to login to cluster {cluster_name} using clusteradmin, so downloading kubeconfig")
+                self.download_kubeconfig(cluster_name, cluster_info["path"], "kubeconfig")
+                cluster_info["kubeconfig"] = cluster_info["path"] + "/kubeconfig"
+                self.logging.debug(f"Use kubeconfig file to login to clusters {cluster_name}")
             if cluster_info["workers_wait_time"]:
                 with concurrent.futures.ThreadPoolExecutor() as wait_executor:
                     futures = [wait_executor.submit(self._wait_for_workers, cluster_info["kubeconfig"], cluster_info["workers"], cluster_info["workers_wait_time"], cluster_name, "workers")]

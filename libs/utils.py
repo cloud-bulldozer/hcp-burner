@@ -126,6 +126,10 @@ class Utils:
             platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(cluster_name)
             platform.environment["clusters"][cluster_name]["status"] = platform.environment["clusters"][cluster_name]["metadata"]["status"]
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
+            platform.environment["clusters"][cluster_name]["kubeconfig"] = platform.environment["clusters"][cluster_name]["path"] + "/kubeconfig"
+            platform.environment['clusters'][cluster_name]['workers'] = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
+        cluster_mc = platform.get_mc(platform.get_cluster_id(cluster_name))
+        platform.environment["mc_kubeconfig"] = platform.environment["path"] + "/kubeconfig_" + cluster_mc
         return platform
 
     def load_scheduler(self, platform):

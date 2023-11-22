@@ -69,6 +69,7 @@ if __name__ == "__main__":
 
     if 'enabled' in platform.environment['load'] and str(platform.environment['load']['enabled']).lower() == "true":
         # Prometheus takes a lot of time to start after all nodes are ready. we maybe needs to increase this sleep in the future
+        platform = utils.get_cluster_info(platform)
         logging.info("Waiting 5 minutes to allow all clusters to create all pods")
         time.sleep(300)
         load_threads = utils.load_scheduler(platform)

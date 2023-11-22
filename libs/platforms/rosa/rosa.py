@@ -227,6 +227,7 @@ class Rosa(Platform):
         metadata["status"] = result.get("state", None)
         metadata["version"] = result.get("version", {}).get("raw_id", None)
         metadata["zones"] = result.get("nodes", {}).get("availability_zones", None)
+        metadata["operator_role_prefix"] = result.get("aws", {}).get("sts", {}).get("operator_role_prefix", None)
         return metadata
 
     def _preflight_wait(self, cluster_id, cluster_name):

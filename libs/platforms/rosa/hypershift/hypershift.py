@@ -419,7 +419,7 @@ class Hypershift(Rosa):
         os.mkdir(cluster_info["path"])
         self.logging.debug("Attempting cluster installation")
         self.logging.debug("Output directory set to %s" % cluster_info["path"])
-        cluster_cmd = ["rosa", "create", "cluster", "--cluster-name", cluster_name, "--replicas", str(cluster_info["workers"]), "--hosted-cp", "--sts", "--mode", "auto", "-y", "--output", "json", "--oidc-config-id", platform.environment["oidc_config_id"]]
+        cluster_cmd = ["rosa", "create", "cluster", "--cluster-name", cluster_name, "--replicas", str(cluster_info["workers"]), "--hosted-cp", "--sts", "--mode", "auto", "-y", "--output", "json", "--oidc-config-id", platform.environment["oidc_config_id"], "--region", platform.environment["aws"]["region"]]
         if platform.environment["create_vpcs"]:
             self.logging.debug(platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])])
             cluster_info["vpc"] = platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])]

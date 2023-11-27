@@ -127,36 +127,26 @@ class Rosa(Platform):
             )
             return False
         else:
-            self.logging.info(
-                f"Deleted oidc-config ID {self.environment['oidc_config_id']}"
-            )
+            self.logging.info(f"Deleted oidc-config ID {self.environment['oidc_config_id']}")
             return True
 
     def _create_operator_roles(self):
         self.logging.info("Finding latest installer Role ARN")
-        roles_code, roles_out, roles_err = self.utils.subprocess_exec(
-            "rosa list account-roles -o json"
-        )
+        roles_code, roles_out, roles_err = self.utils.subprocess_exec("rosa list account-roles -o json")
         if roles_code == 0:
             self.logging.info("Installer Role ARN list obtained")
             installer_role_version = ver.parse("0")
             installer_role_arn = None
             for role in json.loads(roles_out.decode("utf-8")):
-                if (
-                    role["RoleType"] == "Installer"
-                    and ver.parse(role["Version"]) > installer_role_version
-                ):
+                if role["RoleType"] == "Installer" and role.get("ManagedPolicy", False) and ver.parse(role["Version"]) > installer_role_version:
                     installer_role_arn = role["RoleARN"]
                     installer_role_version = ver.parse(role["Version"])
-                    self.logging.info(
-                        f"Selected {installer_role_arn} as latest Installer Role ARN"
-                    )
-                    break
+                    self.logging.info(f"Selected {installer_role_arn} on {installer_role_version} as Installer Role ARN")
+            if installer_role_arn is None:
+                return False
         else:
             return False
-        self.logging.info(
-            f"Creating operator roles for cluster seed {self.environment['cluster_name_seed']} with Installer Role ARN {installer_role_arn}"
-        )
+        self.logging.info(f"Creating operator roles for cluster seed {self.environment['cluster_name_seed']} with Installer Role ARN {installer_role_arn}")
         (
             operator_roles_code,
             operator_roles_out,
@@ -171,9 +161,7 @@ class Rosa(Platform):
             self.environment["path"] + "/rosa_create_operator_roles.log",
         )
         if operator_roles_code == 0:
-            self.logging.info(
-                f"Created operator roles for cluster seed {self.environment['cluster_name_seed']}"
-            )
+            self.logging.info(f"Created operator roles for cluster seed {self.environment['cluster_name_seed']}")
             return True
         else:
             return False

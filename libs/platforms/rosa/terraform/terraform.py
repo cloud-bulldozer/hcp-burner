@@ -270,5 +270,5 @@ class TerraformArguments(RosaArguments):
             config = configparser.ConfigParser()
             config.read(config_file)
             defaults = {}
-            defaults.update(dict(config.items("Platform:Rosa:Hypershift")))
+            defaults.update(dict(config.items("Platform:Rosa:Terraform")))
             parser.set_defaults(**defaults)

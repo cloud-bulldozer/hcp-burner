@@ -50,32 +50,24 @@ class Hypershift(Rosa):
 
         # Set Provision Shard
         if self.environment["service_cluster"]:
-            self.logging.info(
-                f"Verifying Provision Shard for Service Cluster: {self.environment['service_cluster']}"
-            )
+            self.logging.info(f"Verifying Provision Shard for Service Cluster: {self.environment['service_cluster']}")
             self.environment["shard_id"] = self._verify_provision_shard()
             sys.exit("Exiting...") if self.environment["shard_id"] is None else self.logging.info(f"Found provision shard {self.environment['shard_id']} for Service Cluster {self.environment['service_cluster']}")
             self.environment["sc_kubeconfig"] = self.download_kubeconfig(self.environment["service_cluster"], self.environment["path"])
 
         # Set OIDC Config
+        self.logging.info("Verifying OIDC config")
         sys.exit("Exiting") if not self._set_oidc_config() else self.logging.info(f"Using {self.environment['oidc_config_id']} as OIDC config ID")
 
         # Set Operator Roles
+        self.logging.info("Verifying Operator Roles")
         if self.environment["common_operator_roles"]:
-            sys.exit(
-                "Exiting"
-            ) if not self._create_operator_roles() else self.logging.info(
-                f"Using {self.environment['cluster_name_seed']} as Operator Roles Prefix"
-            )
+            sys.exit("Exiting") if not self._create_operator_roles() else self.logging.info(f"Using {self.environment['cluster_name_seed']} as Operator Roles Prefix")
 
         # Create VPCs
         if self.environment["create_vpcs"]:
-            vpcs_to_create = math.ceil(
-                self.environment["cluster_count"] / self.environment["clusters_per_vpc"]
-            )
-            self.logging.info(
-                f"Clusters Requested: {self.environment['cluster_count']}. Clusters Per VPC: {self.environment['clusters_per_vpc']}. VPCs to create: {vpcs_to_create}"
-            )
+            vpcs_to_create = math.ceil(self.environment["cluster_count"] / self.environment["clusters_per_vpc"])
+            self.logging.info(f"Clusters Requested: {self.environment['cluster_count']}. Clusters Per VPC: {self.environment['clusters_per_vpc']}. VPCs to create: {vpcs_to_create}")
             os.mkdir(self.environment["path"] + "/terraform")
             shutil.copyfile(
                 sys.path[0] + "/libs/platforms/rosa/hypershift/terraform/setup-vpcs.tf",
@@ -83,9 +75,7 @@ class Hypershift(Rosa):
             )
             self.environment["vpcs"] = self._create_vpcs(vpcs_to_create)
             if len(self.environment["vpcs"]) == 0:
-                self.logging.error(
-                    "Failed to create AWS VPCs, jumping to cleanup and exiting..."
-                )
+                self.logging.error("Failed to create AWS VPCs, jumping to cleanup and exiting...")
                 self.platform_cleanup()
                 sys.exit("Exiting")
             else:
@@ -118,9 +108,7 @@ class Hypershift(Rosa):
         super().platform_cleanup()
         self.logging.info("Cleaning resources")
         # Delete Operator Roles
-        self._delete_operator_roles() if self.environment[
-            "common_operator_roles"
-        ] else None
+        self._delete_operator_roles() if self.environment["common_operator_roles"] else None
         # Delete oidc-config
         self._delete_oidc_config() if self.environment["oidc_cleanup"] else None
         # Delete VPCs
@@ -433,7 +421,7 @@ class Hypershift(Rosa):
                 cluster_cmd.append(param)
         if self.environment["common_operator_roles"]:
             cluster_cmd.append("--operator-roles-prefix")
-            cluster_cmd.append(self.environment["common_operator_roles"])
+            cluster_cmd.append(self.environment["cluster_name_seed"])
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         self.logging.info(f"Trying to install cluster {cluster_name} with {cluster_info['workers']} workers up to 5 times")
         trying = 0

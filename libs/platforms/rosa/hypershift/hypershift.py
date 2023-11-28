@@ -297,7 +297,7 @@ class Hypershift(Rosa):
                 self.logging.debug(
                     f"Destroying STS associated resources of cluster name: {cluster_name}"
                 )
-                (operators_code, operators_out, operators_err) = self.utils.subprocess_exec("rosa delete operator-roles --prefix " + operator_role_prefix + " -m auto -y", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
+                (operators_code, operators_out, operators_err) = self.utils.subprocess_exec("rosa delete operator-roles --prefix " + operator_role_prefix + " -m auto -y", cluster_info["path"] + "/operator-role-cleanup.log", {'preexec_fn': self.utils.disable_signals})
                 if operators_code != 0:
                     self.logging.error(
                         f"Failed to delete operator roles on cluster {cluster_name}"
@@ -444,7 +444,7 @@ class Hypershift(Rosa):
                 return 0
             self.logging.info("Cluster Create Command:")
             self.logging.info(cluster_cmd)
-            (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals})
+            (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/rosa-create.log", {'preexec_fn': self.utils.disable_signals})
             trying += 1
             if create_cluster_code != 0:
                 cluster_info["install_try"] = trying

@@ -169,6 +169,7 @@ class Terraform(Rosa):
                         return 1
                 else:
                     cluster_end_time = int(datetime.datetime.utcnow().timestamp())
+                    index_time = datetime.datetime.utcnow().isoformat()
                     break
 
         cluster_info['status'] = "installed"
@@ -202,7 +203,7 @@ class Terraform(Rosa):
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
         if self.es is not None:
-            cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+            cluster_info["timestamp"] = index_time
             self.es.index_metadata(cluster_info)
 
     def _wait_for_workers(self, kubeconfig, worker_nodes, wait_time, cluster_name, machinepool_name):

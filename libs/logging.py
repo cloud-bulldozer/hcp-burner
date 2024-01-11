@@ -66,8 +66,8 @@ class CustomFormatter(logging.Formatter):
 class LoggingArguments:
     def __init__(self, parser, config_file, environment):
         EnvDefault = self.EnvDefault
-        parser.add_argument("--log-level", action=EnvDefault, env=environment, envvar="ROSA_BURNER_LOG_LEVEL", default="INFO")
-        parser.add_argument("--log-file",  action=EnvDefault, env=environment, envvar="ROSA_BURNER_LOG_FILE")
+        parser.add_argument("--log-level", action=EnvDefault, env=environment, envvar="HCP_BURNER_LOG_LEVEL", default="INFO")
+        parser.add_argument("--log-file",  action=EnvDefault, env=environment, envvar="HCP_BURNER_LOG_FILE")
 
         args, unknown_args = parser.parse_known_args()
 

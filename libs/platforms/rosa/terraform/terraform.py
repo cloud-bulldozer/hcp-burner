@@ -265,7 +265,7 @@ class TerraformArguments(RosaArguments):
 
         parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
 #        parser.add_argument("--clusters-per-apply", type=int, default=1, help="Number of clusters to install on each terraform apply")
-#        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
+#        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
 
         if config_file:
             config = configparser.ConfigParser()

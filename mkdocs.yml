@@ -1,5 +1,5 @@
 docs_dir: docs/
-repo_url: https://github.com/cloud-bulldozer/rosa-burner
+repo_url: https://github.com/cloud-bulldozer/hcp-burner
 nav:
 - Home: index.md
 - Platforms:
@@ -13,7 +13,7 @@ nav:
   - development/index.md
   - CI: development/ci.md
   - Tests: development/ci/tests.md
-site_name: Rosa-burner
+site_name: HCP-Burner
 plugins:
   - search
   - include-markdown

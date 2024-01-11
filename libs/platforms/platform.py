@@ -195,8 +195,8 @@ class PlatformArguments:
     def __init__(self, parser, config_file, environment):
         EnvDefault = self.EnvDefault
 
-        parser.add_argument("--ocm-token", action=EnvDefault, env=environment, envvar="ROSA_BURNER_OCM_TOKEN", help="Token to access OCM API")
-        parser.add_argument("--ocm-url", action=EnvDefault, env=environment, envvar="ROSA_BURNER_OCM_URL", help="OCM URL", default="https://api.stage.openshift.com")
+        parser.add_argument("--ocm-token", action=EnvDefault, env=environment, envvar="HCP_BURNER_OCM_TOKEN", help="Token to access OCM API")
+        parser.add_argument("--ocm-url", action=EnvDefault, env=environment, envvar="HCP_BURNER_OCM_URL", help="OCM URL", default="https://api.stage.openshift.com")
 
         if config_file:
             config = configparser.ConfigParser()
@@ -207,7 +207,7 @@ class PlatformArguments:
 
         temp_args, temp_unknown_args = parser.parse_known_args()
         if not temp_args.ocm_token:
-            parser.error("rosa-burner.py: error: the following arguments (or equivalent definition) are required: --ocm-token")
+            parser.error("hcp-burner.py: error: the following arguments (or equivalent definition) are required: --ocm-token")
 
     # def __getitem__(self, item):
     #     return self.parameters[item] if item in self.parameters else None

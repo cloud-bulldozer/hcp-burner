@@ -11,5 +11,5 @@ To use the config file, define parameters related to platform under the `[Platfo
 
 | Argument                 | Default Value     | Config file variable | Environment Variable           |
 |--------------------------|-------------------|----------------------|--------------------------------|
-| --ocm-token              |   | ocm_token                     | ROSA_BURNER_OCM_TOKEN          |
-| --ocm-url                | https://api.stage.openshift.com | ocm_url | ROSA_BURNER_OCM_URL                     |
+| --ocm-token              |   | ocm_token                     | HCP_BURNER_OCM_TOKEN          |
+| --ocm-url                | https://api.stage.openshift.com | ocm_url | HCP_BURNER_OCM_URL                     |

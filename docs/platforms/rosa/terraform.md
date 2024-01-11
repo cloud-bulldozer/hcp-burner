@@ -4,7 +4,7 @@
 Classes related to Terraform subplatform
 
 As terraform is a subplatform or ROSA, select rosa as platform parameter and terraform as subplatform:
-`rosa-burner --platform rosa --subplatform terraform`
+`hcp-burner --platform rosa --subplatform terraform`
 
 ## Platforms Arguments
 

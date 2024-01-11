@@ -52,7 +52,7 @@ jobs:
         HCP_BURNER_AWS_ACCOUNT_FILE: "/tmp/aws_config.ini"
         HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER: ${{ secrets.HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER}}
         HCP_BURNER_ES_URL: ${{ secrets.HCP_BURNER_ES_URL}}
-        HCP_BURNER_ES_INDEX: "rosa-burner"
+        HCP_BURNER_ES_INDEX: "hcp-burner"
 
     # - name: Install bats
     #   uses: mig4/setup-bats@v1

@@ -1,12 +1,12 @@
 ---
-title: Rosa Burner Docs
+title: HCP Burner Docs
 ---
 
-## What is rosa-burner
+## What is HCP-Burner
 
-Rosa-burner is a wrapper to automate create-use-destroy of OCP clusters in the different managed platforms.
+hcp-burner is a wrapper to automate create-use-destroy of OCP clusters in the different managed platforms.
 
-## How rosa-burner works
+## How HCP-Burner works
 
 Following helpers are available for every platform:
 
@@ -41,11 +41,11 @@ Following platforms are available at this moment:
 
 Almost all the parameters can be defined in three ways:
 - Wrapper parameters:
-`rosa-burner.py --cluster-count 100`
+`hcp-burner.py --cluster-count 100`
 - Environment Variable:
-`ROSA_BURNER_CLUSTER_COUNT=100 rosa-burner.py`
+`HCP_BURNER_CLUSTER_COUNT=100 hcp-burner.py`
 - Configuration File:
-`rosa-burner.py --config-file ./rosa-burner.conf`
+`hcp-burner.py --config-file ./hcp-burner.ini`
 
 **Only parameters --platform and --subplatform must be defined as wrapper arguments, platform is always required but subplatform is optional**
 
@@ -57,7 +57,7 @@ To add any other parameter to the config file, remove `--` from the argument and
 cluster_name_seed = test
 ```
 
-Full version of a config file can be found on **rosa-burner.conf** file
+Full version of a config file can be found on **hcp-burner.ini** file
 
 ## Preference
 
@@ -71,32 +71,32 @@ To use the config file, define common parameters under the `[Defaults]` section
 
 | Argument                 | Default Value     | Config file variable | Environment Variable           |
 |--------------------------|-------------------|----------------------|--------------------------------|
-| --config-file            |                   |                      | ROSA_BURNER_CONFIG_FILE        |
+| --config-file            |                   |                      | HCP_BURNER_CONFIG_FILE        |
 | --install-clusters       |                   |                      |                                |
-| --platform               |                   | platform             | ROSA_BURNER_PLATFORM           |
-| --subplatform            |                   | subplatform          | ROSA_BURNER_SUBPLATFORM        |
-| --uuid                   |                   |                      | ROSA_BURNER_UUID               |
-| --path                   |                   |                      | ROSA_BURNER_PATH               |
-| --cluster-name-seed      |                   |                      | ROSA_BURNER_CLUSTER_NAME_SEED  |
-| --static-cluster-name    |                   |                      | ROSA_BURNER_STATIC_CLUSTER_NAME|
-| --workers                | 3                 |                      | ROSA_BURNER_WORKERS            |
-| --workers-wait-time      | 60                |                      | ROSA_BURNER_WORKERS_WAIT_TIME  |
+| --platform               |                   | platform             | HCP_BURNER_PLATFORM           |
+| --subplatform            |                   | subplatform          | HCP_BURNER_SUBPLATFORM        |
+| --uuid                   |                   |                      | HCP_BURNER_UUID               |
+| --path                   |                   |                      | HCP_BURNER_PATH               |
+| --cluster-name-seed      |                   |                      | HCP_BURNER_CLUSTER_NAME_SEED  |
+| --static-cluster-name    |                   |                      | HCP_BURNER_STATIC_CLUSTER_NAME|
+| --workers                | 3                 |                      | HCP_BURNER_WORKERS            |
+| --workers-wait-time      | 60                |                      | HCP_BURNER_WORKERS_WAIT_TIME  |
 | --wait-for-workers       |                   |                      |                                |
-| --cluster-count          | 1                 |                      | ROSA_BURNER_CLUSTER_COUNT      |
-| --delay-between-batch    | 60                |                      | ROSA_BURNER_DELAY_BETWEEN_BATCH|
-| --batch-size             | 0                 |                      | ROSA_BURNER_BATCH_SIZE         |
-| --watcher-delay          | 60                |                      | ROSA_BURNER_WATCHER_DELAY      |
-| --wildcard-options       |                   |                      | ROSA_BURNER_WILDCARD_OPTIONS   |
+| --cluster-count          | 1                 |                      | HCP_BURNER_CLUSTER_COUNT      |
+| --delay-between-batch    | 60                |                      | HCP_BURNER_DELAY_BETWEEN_BATCH|
+| --batch-size             | 0                 |                      | HCP_BURNER_BATCH_SIZE         |
+| --watcher-delay          | 60                |                      | HCP_BURNER_WATCHER_DELAY      |
+| --wildcard-options       |                   |                      | HCP_BURNER_WILDCARD_OPTIONS   |
 | --enable-workload        |                   |                      |                                |
-| --workload-repo          | https://github.com/cloud-bulldozer/e2e-benchmarking.git | workload_repo | ROSA_BURNER_WORKLOAD_REPO |
-| --workload               | cluster-density-ms | workload             | ROSA_BURNER_WORKLOAD           |
-| --workload-script-path        | workloads/kube-burner-ocp-wrapper | workload_script_path | ROSA_BURNER_WORKLOAD_SCRIPT_PATH |
-| --workload-executor      | /usr/bin/kube-burner | workload_executor | ROSA_BURNER_WORKLOAD_EXECUTOR |
-| --workload-duration      | 1h                |                      | ROSA_BURNER_WORKLOAD_DURATION  |
-| --workload-jobs          | 10                |                      | ROSA_BURNER_WORKLOAD_JOBS      |
+| --workload-repo          | https://github.com/cloud-bulldozer/e2e-benchmarking.git | workload_repo | HCP_BURNER_WORKLOAD_REPO |
+| --workload               | cluster-density-ms | workload             | HCP_BURNER_WORKLOAD           |
+| --workload-script-path        | workloads/kube-burner-ocp-wrapper | workload_script_path | HCP_BURNER_WORKLOAD_SCRIPT_PATH |
+| --workload-executor      | /usr/bin/kube-burner | workload_executor | HCP_BURNER_WORKLOAD_EXECUTOR |
+| --workload-duration      | 1h                |                      | HCP_BURNER_WORKLOAD_DURATION  |
+| --workload-jobs          | 10                |                      | HCP_BURNER_WORKLOAD_JOBS      |
 | --cleanup-clusters       |                   |                      |                                |
-| --wait-before-cleanup    | 0                 |                      | ROSA_BURNER_WAIT_BEFORE_CLEANUP|
-| --delay-between-cleanup  | 0                 |                      | ROSA_BURNER_DELAY_BETWEEN_CLEANUP |
+| --wait-before-cleanup    | 0                 |                      | HCP_BURNER_WAIT_BEFORE_CLEANUP|
+| --delay-between-cleanup  | 0                 |                      | HCP_BURNER_DELAY_BETWEEN_CLEANUP |
 
 ## ElasticSearch arguments
 
@@ -104,9 +104,9 @@ To use the config file, define common parameters under the `[Elasticsearch]` sec
 
 | Argument                 | Default Value     | Config file variable | Environment Variable           |
 |--------------------------|-------------------|----------------------|--------------------------------|
-| --es-url               |                   |                         | ROSA_BURNER_ES_URL              |
-| --es-index             | rosa-burner       |                         | ROSA_BURNER_ES_INDEX            |
-| --es-index-retry       | 5                 |                         | ROSA_BURNER_ES_INDEX_RETRY      |
+| --es-url               |                   |                         | HCP_BURNER_ES_URL              |
+| --es-index             | hcp-burner       |                         | HCP_BURNER_ES_INDEX            |
+| --es-index-retry       | 5                 |                         | HCP_BURNER_ES_INDEX_RETRY      |
 | --es-insecure          |                   |                         |                                 |
 
 ## Logging arguments
@@ -115,5 +115,5 @@ To use the config file, define common parameters under the `[Logging]` section
 
 | Argument                 | Default Value     | Config file variable | Environment Variable           |
 |--------------------------|-------------------|----------------------|--------------------------------|
-| --log-level              | INFO              |                      | ROSA_BURNER_LOG_LEVEL          |
-| --log-file               |                   |                      | ROSA_BURNER_LOG_FILE           |
+| --log-level              | INFO              |                      | HCP_BURNER_LOG_LEVEL          |
+| --log-file               |                   |                      | HCP_BURNER_LOG_FILE           |

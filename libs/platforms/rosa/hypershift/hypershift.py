@@ -646,9 +646,9 @@ class HypershiftArguments(RosaArguments):
         EnvDefault = self.EnvDefault
 
         parser.add_argument("--create-vpcs", action="store_true", help="Create a VPC for each Hosted Cluster")
-        parser.add_argument("--clusters-per-vpc", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTERS_PER_VPC", help="Number of HC to create on each VPC", type=int, default=1, choices=range(1, 11))
+        parser.add_argument("--clusters-per-vpc", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTERS_PER_VPC", help="Number of HC to create on each VPC", type=int, default=1, choices=range(1, 11))
         parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
-        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
+        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
         parser.add_argument("--delete-vpcs", action="store_true", help="Delete all VPC after cleanup")
 
         if config_file:

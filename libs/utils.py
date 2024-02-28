@@ -116,7 +116,7 @@ class Utils:
                 self.logging.info(
                     f"Waiting {platform.environment['delay_between_cleanup']} minutes before deleting the next cluster"
                 )
-                time.sleep(platform.environment["delay_between_cleanup"])
+                time.sleep(platform.environment["delay_between_cleanup"] * 60)
         return delete_cluster_thread_list
 
     # To form the cluster_info dict for cleanup funtions

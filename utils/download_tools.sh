@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tool for downloading required binaries used by the rosa-burner script
+# Tool for downloading required binaries used by the hcp-burner script
 # ocm: tool for managing managed clusters
 # rosa: tool for managing rosa clusters
 # terraform: tool for creating resources on AWS

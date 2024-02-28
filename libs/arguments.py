@@ -21,46 +21,46 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser = argparse.ArgumentParser(description="Common Arguments", add_help=False)
 
-        self.common_parser.add_argument("--config-file", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CONFIG_FILE", type=str)
+        self.common_parser.add_argument("--config-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_CONFIG_FILE", type=str)
 
         self.common_parser.add_argument("--install-clusters", action="store_true", help="Start bringing up clusters")
 
-        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="ROSA_BURNER_PLATFORM", required=True, choices=["rosa"])
-        self.common_parser.add_argument("--subplatform", dest="subplatform", action=EnvDefault, env=environment, envvar="ROSA_BURNER_SUBPLATFORM", help="Subplatforms of Platform")
+        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa"])
+        self.common_parser.add_argument("--subplatform", dest="subplatform", action=EnvDefault, env=environment, envvar="HCP_BURNER_SUBPLATFORM", help="Subplatforms of Platform")
 
-        self.common_parser.add_argument("--uuid", action=EnvDefault, env=environment, envvar="ROSA_BURNER_UUID")
-        self.common_parser.add_argument("--path", action=EnvDefault, env=environment, envvar="ROSA_BURNER_PATH")
+        self.common_parser.add_argument("--uuid", action=EnvDefault, env=environment, envvar="HCP_BURNER_UUID")
+        self.common_parser.add_argument("--path", action=EnvDefault, env=environment, envvar="HCP_BURNER_PATH")
 
-        self.common_parser.add_argument("--static-cluster-name", action=EnvDefault, env=environment, envvar="ROSA_BURNER_STATIC_CLUSTER_NAME", type=str, help="Input used to form cluster name prefix. 10 chars max")
+        self.common_parser.add_argument("--static-cluster-name", action=EnvDefault, env=environment, envvar="HCP_BURNER_STATIC_CLUSTER_NAME", type=str, help="Input used to form cluster name prefix. 10 chars max")
 
-        self.common_parser.add_argument("--cluster-name-seed", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTER_NAME_SEED", type=str, help="Seed used to generate cluster names. 6 chars max")
+        self.common_parser.add_argument("--cluster-name-seed", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTER_NAME_SEED", type=str, help="Seed used to generate cluster names. 6 chars max")
 
-        self.common_parser.add_argument("--workers", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKERS", type=str, default="3",
+        self.common_parser.add_argument("--workers", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKERS", type=str, default="3",
                                         help="Number of workers for the hosted cluster (min: 3). If list (comma separated), iteration over the list until reach number of clusters")
-        self.common_parser.add_argument("--workers-wait-time", type=int, default=60, action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKERS_WAIT_TIME",
+        self.common_parser.add_argument("--workers-wait-time", type=int, default=60, action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKERS_WAIT_TIME",
                                         help="Waiting time in minutes for the workers to be Ready after cluster installation or machinepool creation . If 0, do not wait. Default: 60 minutes")
         self.common_parser.add_argument("--wait-for-workers", action="store_true", help="After cluster will be ready, wait for all workers to be also ready")
 
-        self.common_parser.add_argument("--cluster-count", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTER_COUNT", type=int, default=1)
-        self.common_parser.add_argument("--delay-between-batch", action=EnvDefault, env=environment, envvar="ROSA_BURNER_DELAY_BETWEEN_BATCH", default=60, type=int,
+        self.common_parser.add_argument("--cluster-count", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTER_COUNT", type=int, default=1)
+        self.common_parser.add_argument("--delay-between-batch", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_BATCH", default=60, type=int,
                                         help="If set it will wait x seconds between each batch request")
-        self.common_parser.add_argument("--batch-size", action=EnvDefault, env=environment, envvar="ROSA_BURNER_BATCH_SIZE", type=int, default=0, help="number of clusters in a batch")
+        self.common_parser.add_argument("--batch-size", action=EnvDefault, env=environment, envvar="HCP_BURNER_BATCH_SIZE", type=int, default=0, help="number of clusters in a batch")
 
-        self.common_parser.add_argument("--watcher-delay", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WATCHER_DELAY", default=60, type=int, help="Delay between each status check")
+        self.common_parser.add_argument("--watcher-delay", action=EnvDefault, env=environment, envvar="HCP_BURNER_WATCHER_DELAY", default=60, type=int, help="Delay between each status check")
 
-        self.common_parser.add_argument("--wildcard-options", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WILDCARD_OPTIONS", help="String to be passed directly to cluster create command on any platform. It wont be validated")
+        self.common_parser.add_argument("--wildcard-options", action=EnvDefault, env=environment, envvar="HCP_BURNER_WILDCARD_OPTIONS", help="String to be passed directly to cluster create command on any platform. It wont be validated")
 
         self.common_parser.add_argument("--enable-workload", action="store_true", help="Execute workload after clusters are installed")
-        self.common_parser.add_argument("--workload-repo", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKLOAD_REPO", default="https://github.com/cloud-bulldozer/e2e-benchmarking.git", type=str, help="Git Repo of the workload")
-        self.common_parser.add_argument("--workload", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKLOAD", help="Workload to execute after clusters are installed", default="cluster-density-ms")
-        self.common_parser.add_argument("--workload-script-path", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKLOAD_SCRIPT_PATH", help="Workload to execute after clusters are installed", default="workloads/kube-burner-ocp-wrapper")
-        self.common_parser.add_argument("--workload-executor", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKLOAD_EXECUTOR", help="Complete path of binary used to execute the workload", default="/usr/bin/kube-burner")
-        self.common_parser.add_argument("--workload-duration", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKLOAD_DURATION", default="1h", type=str, help="Workload execution duration in minutes")
-        self.common_parser.add_argument("--workload-jobs", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WORKLOAD_JOBS", type=int, default=10, help="Jobs per worker.Workload will scale this number to the number of workers of the cluster")
+        self.common_parser.add_argument("--workload-repo", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_REPO", default="https://github.com/cloud-bulldozer/e2e-benchmarking.git", type=str, help="Git Repo of the workload")
+        self.common_parser.add_argument("--workload", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD", help="Workload to execute after clusters are installed", default="cluster-density-ms")
+        self.common_parser.add_argument("--workload-script-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT_PATH", help="Workload to execute after clusters are installed", default="workloads/kube-burner-ocp-wrapper")
+        self.common_parser.add_argument("--workload-executor", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXECUTOR", help="Complete path of binary used to execute the workload", default="/usr/bin/kube-burner")
+        self.common_parser.add_argument("--workload-duration", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_DURATION", default="1h", type=str, help="Workload execution duration in minutes")
+        self.common_parser.add_argument("--workload-jobs", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_JOBS", type=int, default=10, help="Jobs per worker.Workload will scale this number to the number of workers of the cluster")
 
         self.common_parser.add_argument("--cleanup-clusters", action="store_true", help="Delete all created clusters at the end")
-        self.common_parser.add_argument("--wait-before-cleanup", action=EnvDefault, env=environment, envvar="ROSA_BURNER_WAIT_BEFORE_CLEANUP", help="Minutes to wait before starting the cleanup process", default=0, type=int)
-        self.common_parser.add_argument("--delay-between-cleanup", action=EnvDefault, env=environment, envvar="ROSA_BURNER_DELAY_BETWEEN_CLEANUP", help="Minutes to wait between cluster deletion", default=0, type=int)
+        self.common_parser.add_argument("--wait-before-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_WAIT_BEFORE_CLEANUP", help="Minutes to wait before starting the cleanup process", default=0, type=int)
+        self.common_parser.add_argument("--delay-between-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_CLEANUP", help="Minutes to wait between cluster deletion", default=0, type=int)
 
         self.common_args, self.unknown_args = self.common_parser.parse_known_args()
 
@@ -89,7 +89,7 @@ class Arguments(argparse.ArgumentParser):
             sys.exit("Exiting...")
 
         self.parser = argparse.ArgumentParser(
-            description="Rosa-Burner",
+            description="HCP-Burner",
             add_help=True,
             parents=[
                 self.common_parser,

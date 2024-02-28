@@ -79,6 +79,10 @@ class Utils:
                 self.logging.error(f"Failed to execute command: {command}")
                 self.logging.error(stdout if stdout else "")
                 self.logging.error(stderr if stderr else "")
+                if output_file:
+                    with open(output_file, "r") as log_read:
+                        content = log_read.read()
+                        self.logging.error(content)
             return process.returncode, stdout, stderr
         except Exception as err:
             self.logging.error(f"Error executing command: {command}")

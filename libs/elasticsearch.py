@@ -73,9 +73,9 @@ class Elasticsearch:
 class ElasticArguments:
     def __init__(self, parser, config_file, environment):
         EnvDefault = self.EnvDefault
-        parser.add_argument("--es-url", action=EnvDefault, env=environment, envvar="ROSA_BURNER_ES_URL", help="Elasticsearch URL")
-        parser.add_argument("--es-index", action=EnvDefault, env=environment, envvar="ROSA_BURNER_ES_INDEX", help="Elasticsearch Index", default="rosa-burner")
-        parser.add_argument("--es-index-retry", action=EnvDefault, env=environment, envvar="ROSA_BURNER_ES_INDEX_RETRY", type=int, help="Number of retries when index operation fails", default=5)
+        parser.add_argument("--es-url", action=EnvDefault, env=environment, envvar="HCP_BURNER_ES_URL", help="Elasticsearch URL")
+        parser.add_argument("--es-index", action=EnvDefault, env=environment, envvar="HCP_BURNER_ES_INDEX", help="Elasticsearch Index", default="hcp-burner")
+        parser.add_argument("--es-index-retry", action=EnvDefault, env=environment, envvar="HCP_BURNER_ES_INDEX_RETRY", type=int, help="Number of retries when index operation fails", default=5)
         parser.add_argument("--es-insecure", action="store_true", help="Bypass cert verification on SSL connections")
 
         args, unknown_args = parser.parse_known_args()

@@ -169,6 +169,7 @@ class Terraform(Rosa):
                         return 1
                 else:
                     cluster_end_time = int(datetime.datetime.utcnow().timestamp())
+                    index_time = datetime.datetime.utcnow().isoformat()
                     break
 
         cluster_info['status'] = "installed"
@@ -202,7 +203,7 @@ class Terraform(Rosa):
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
         if self.es is not None:
-            cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+            cluster_info["timestamp"] = index_time
             self.es.index_metadata(cluster_info)
 
     def _wait_for_workers(self, kubeconfig, worker_nodes, wait_time, cluster_name, machinepool_name):
@@ -264,11 +265,11 @@ class TerraformArguments(RosaArguments):
 
         parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
 #        parser.add_argument("--clusters-per-apply", type=int, default=1, help="Number of clusters to install on each terraform apply")
-#        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
+#        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
 
         if config_file:
             config = configparser.ConfigParser()
             config.read(config_file)
             defaults = {}
-            defaults.update(dict(config.items("Platform:Rosa:Hypershift")))
+            defaults.update(dict(config.items("Platform:Rosa:Terraform")))
             parser.set_defaults(**defaults)

@@ -50,32 +50,24 @@ class Hypershift(Rosa):
 
         # Set Provision Shard
         if self.environment["service_cluster"]:
-            self.logging.info(
-                f"Verifying Provision Shard for Service Cluster: {self.environment['service_cluster']}"
-            )
+            self.logging.info(f"Verifying Provision Shard for Service Cluster: {self.environment['service_cluster']}")
             self.environment["shard_id"] = self._verify_provision_shard()
             sys.exit("Exiting...") if self.environment["shard_id"] is None else self.logging.info(f"Found provision shard {self.environment['shard_id']} for Service Cluster {self.environment['service_cluster']}")
             self.environment["sc_kubeconfig"] = self.download_kubeconfig(self.environment["service_cluster"], self.environment["path"])
 
         # Set OIDC Config
+        self.logging.info("Verifying OIDC config")
         sys.exit("Exiting") if not self._set_oidc_config() else self.logging.info(f"Using {self.environment['oidc_config_id']} as OIDC config ID")
 
         # Set Operator Roles
+        self.logging.info("Verifying Operator Roles")
         if self.environment["common_operator_roles"]:
-            sys.exit(
-                "Exiting"
-            ) if not self._create_operator_roles() else self.logging.info(
-                f"Using {self.environment['cluster_name_seed']} as Operator Roles Prefix"
-            )
+            sys.exit("Exiting") if not self._create_operator_roles() else self.logging.info(f"Using {self.environment['cluster_name_seed']} as Operator Roles Prefix")
 
         # Create VPCs
         if self.environment["create_vpcs"]:
-            vpcs_to_create = math.ceil(
-                self.environment["cluster_count"] / self.environment["clusters_per_vpc"]
-            )
-            self.logging.info(
-                f"Clusters Requested: {self.environment['cluster_count']}. Clusters Per VPC: {self.environment['clusters_per_vpc']}. VPCs to create: {vpcs_to_create}"
-            )
+            vpcs_to_create = math.ceil(self.environment["cluster_count"] / self.environment["clusters_per_vpc"])
+            self.logging.info(f"Clusters Requested: {self.environment['cluster_count']}. Clusters Per VPC: {self.environment['clusters_per_vpc']}. VPCs to create: {vpcs_to_create}")
             os.mkdir(self.environment["path"] + "/terraform")
             shutil.copyfile(
                 sys.path[0] + "/libs/platforms/rosa/hypershift/terraform/setup-vpcs.tf",
@@ -83,9 +75,7 @@ class Hypershift(Rosa):
             )
             self.environment["vpcs"] = self._create_vpcs(vpcs_to_create)
             if len(self.environment["vpcs"]) == 0:
-                self.logging.error(
-                    "Failed to create AWS VPCs, jumping to cleanup and exiting..."
-                )
+                self.logging.error("Failed to create AWS VPCs, jumping to cleanup and exiting...")
                 self.platform_cleanup()
                 sys.exit("Exiting")
             else:
@@ -118,9 +108,7 @@ class Hypershift(Rosa):
         super().platform_cleanup()
         self.logging.info("Cleaning resources")
         # Delete Operator Roles
-        self._delete_operator_roles() if self.environment[
-            "common_operator_roles"
-        ] else None
+        self._delete_operator_roles() if self.environment["common_operator_roles"] else None
         # Delete oidc-config
         self._delete_oidc_config() if self.environment["oidc_cleanup"] else None
         # Delete VPCs
@@ -420,7 +408,7 @@ class Hypershift(Rosa):
         os.mkdir(cluster_info["path"])
         self.logging.debug("Attempting cluster installation")
         self.logging.debug("Output directory set to %s" % cluster_info["path"])
-        cluster_cmd = ["rosa", "create", "cluster", "--cluster-name", cluster_name, "--replicas", str(cluster_info["workers"]), "--hosted-cp", "--sts", "--mode", "auto", "-y", "--output", "json", "--oidc-config-id", platform.environment["oidc_config_id"]]
+        cluster_cmd = ["rosa", "create", "cluster", "--cluster-name", cluster_name, "--replicas", str(cluster_info["workers"]), "--hosted-cp", "--sts", "--mode", "auto", "-y", "--output", "json", "--oidc-config-id", platform.environment["oidc_config_id"], "--region", platform.environment["aws"]["region"]]
         if platform.environment["create_vpcs"]:
             self.logging.debug(platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])])
             cluster_info["vpc"] = platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])]
@@ -434,7 +422,7 @@ class Hypershift(Rosa):
                 cluster_cmd.append(param)
         if self.environment["common_operator_roles"]:
             cluster_cmd.append("--operator-roles-prefix")
-            cluster_cmd.append(self.environment["common_operator_roles"])
+            cluster_cmd.append(self.environment["cluster_name_seed"])
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         self.logging.info(f"Trying to install cluster {cluster_name} with {cluster_info['workers']} workers up to 5 times")
         trying = 0
@@ -495,6 +483,7 @@ class Hypershift(Rosa):
         else:
             cluster_info['status'] = "installed"
             cluster_end_time = int(datetime.datetime.utcnow().timestamp())
+            index_time = datetime.datetime.utcnow().isoformat()
             # Getting againg metadata to update the cluster status
             cluster_info["metadata"] = self.get_metadata(cluster_name)
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
@@ -545,7 +534,7 @@ class Hypershift(Rosa):
                 self.logging.error(err)
                 self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
             if self.es is not None:
-                cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+                cluster_info["timestamp"] = index_time
                 self.es.index_metadata(cluster_info)
                 self.logging.info("Indexing Management cluster stats")
                 os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
@@ -658,9 +647,9 @@ class HypershiftArguments(RosaArguments):
         EnvDefault = self.EnvDefault
 
         parser.add_argument("--create-vpcs", action="store_true", help="Create a VPC for each Hosted Cluster")
-        parser.add_argument("--clusters-per-vpc", action=EnvDefault, env=environment, envvar="ROSA_BURNER_CLUSTERS_PER_VPC", help="Number of HC to create on each VPC", type=int, default=1, choices=range(1, 11))
+        parser.add_argument("--clusters-per-vpc", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTERS_PER_VPC", help="Number of HC to create on each VPC", type=int, default=1, choices=range(1, 11))
         parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
-        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="ROSA_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
+        parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
         parser.add_argument("--delete-vpcs", action="store_true", help="Delete all VPC after cleanup")
 
         if config_file:

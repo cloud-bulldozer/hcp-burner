@@ -96,7 +96,7 @@ class Hypershift(Rosa):
         self.logging.error(f"No Provision Shard found for Service Cluster {self.environment['service_cluster']} on {self.environment['aws']['region']}")
         return None
 
-    def _get_mc(self, cluster_id):
+    def get_mc(self, cluster_id):
         self.logging.debug(f"Get the mgmt cluster of cluster {cluster_id}")
         resp_code, resp_out, resp_err = self.utils.subprocess_exec(
             "ocm get /api/clusters_mgmt/v1/clusters/" + cluster_id + "/hypershift",
@@ -268,7 +268,7 @@ class Hypershift(Rosa):
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["uuid"] = self.environment["uuid"]
         cluster_info["install_method"] = "rosa"
-        cluster_info["mgmt_cluster_name"] = self._get_mc(cluster_info["metadata"]["cluster_id"])
+        cluster_info["mgmt_cluster_name"] = self.get_mc(cluster_info["metadata"]["cluster_id"])
         self.logging.info(f"Deleting cluster {cluster_name} on Hypershift Platform")
         cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("rosa delete cluster -c " + cluster_name + " -y --watch", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
         cluster_delete_end_time = int(datetime.datetime.utcnow().timestamp())
@@ -281,10 +281,11 @@ class Hypershift(Rosa):
             )
             if check_code != 0:
                 cluster_info["status"] = "deleted"
+                operator_role_prefix = cluster_info["metadata"]["operator_role_prefix"]
                 self.logging.debug(
                     f"Destroying STS associated resources of cluster name: {cluster_name}"
                 )
-                (operators_code, operators_out, operators_err) = self.utils.subprocess_exec("rosa delete operator-roles --prefix " + cluster_name + " -m auto -y", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
+                (operators_code, operators_out, operators_err) = self.utils.subprocess_exec("rosa delete operator-roles --prefix " + operator_role_prefix + " -m auto -y", cluster_info["path"] + "/operator-role-cleanup.log", {'preexec_fn': self.utils.disable_signals})
                 if operators_code != 0:
                     self.logging.error(
                         f"Failed to delete operator roles on cluster {cluster_name}"
@@ -431,7 +432,7 @@ class Hypershift(Rosa):
                 return 0
             self.logging.info("Cluster Create Command:")
             self.logging.info(cluster_cmd)
-            (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/installation.log", {'preexec_fn': self.utils.disable_signals})
+            (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/rosa-create.log", {'preexec_fn': self.utils.disable_signals})
             trying += 1
             if create_cluster_code != 0:
                 cluster_info["install_try"] = trying
@@ -470,7 +471,7 @@ class Hypershift(Rosa):
             cluster_info["preflight_checks"] = preflight_ch.result()
             cluster_info["sc_namespace_timing"] = sc_namespace.result() - cluster_start_time if platform.environment["sc_kubeconfig"] != "" else None
 
-            mgmt_cluster_name = self._get_mc(cluster_info["metadata"]["cluster_id"])
+            mgmt_cluster_name = self.get_mc(cluster_info["metadata"]["cluster_id"])
             self.environment["mc_kubeconfig"] = self.download_kubeconfig(mgmt_cluster_name, self.environment["path"])
             mc_namespace = executor.submit(self._namespace_wait, platform.environment["mc_kubeconfig"], cluster_info["metadata"]["cluster_id"], cluster_name, "Management") if platform.environment["mc_kubeconfig"] != "" else 0
             cluster_info["mc_namespace_timing"] = mc_namespace.result() - cluster_start_time if platform.environment["mc_kubeconfig"] != "" else None

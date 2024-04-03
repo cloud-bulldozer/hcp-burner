@@ -463,7 +463,7 @@ class Hypershift(Rosa):
         aws_role_name = self._get_aws_role_name(cluster_name)
         aws_account_id = self._get_aws_account_id()
         self.logging.info(f"Found kube-controller-manager role {aws_role_name} for cluster {cluster_name}")
-        (aws_policy_code, aws_policy_out, aws_policy_err) = self.utils.subprocess_exec("aws iam attach-role-policy --role-name " + aws_role_name + " --policy-arn arn:aws:iam::415909267177:policy/hack-414-custom-policy")
+        (aws_policy_code, aws_policy_out, aws_policy_err) = self.utils.subprocess_exec("aws iam attach-role-policy --role-name " + aws_role_name + " --policy-arn arn:aws:iam::" + aws_account_id + ":policy/hack-414-custom-policy")
         if aws_policy_code != 0:
             cluster_info['status'] = "aws policy failed"
             return 1

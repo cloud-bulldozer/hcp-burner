@@ -400,8 +400,8 @@ class Hypershift(Rosa):
         # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
         (acc_id_code, acc_id_out, acc_id_err) = self.utils.subprocess_exec("aws sts get-caller-identity --output json")
         if acc_id_code == 0:
+            acc_id = json.loads(acc_id_out)            
             return acc_id['Account']
-            return acc_id_out
         self.logging.error(f"Cannot find AWS Account information for the given credentials")
         return None
         

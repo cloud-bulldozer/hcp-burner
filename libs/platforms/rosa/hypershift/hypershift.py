@@ -396,7 +396,7 @@ class Hypershift(Rosa):
         result.append("")
         return result
 
-        def _get_aws_account_id(self):
+    def _get_aws_account_id(self):
         # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
         (acc_id_code, acc_id_out, acc_id_err) = self.utils.subprocess_exec("aws sts get-caller-identity --output json | jq -r '.Account'")
         if acc_id_code == 0:

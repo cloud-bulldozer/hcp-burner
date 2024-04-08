@@ -549,7 +549,7 @@ class Hypershift(Rosa):
                 self.logging.info("Indexing Management cluster stats")
                 os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
                 os.environ["END_TIME"] = f"{cluster_end_time}"
-                logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
+                self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
                 time.sleep(120)                
                 self.utils.cluster_load(platform, cluster_name, load="index")
             # if cluster_load:

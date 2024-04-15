@@ -402,7 +402,7 @@ class Hypershift(Rosa):
         if acc_id_code == 0:
             acc_id = json.loads(acc_id_out)
             return acc_id['Account']
-        self.logging.error(f"Cannot find AWS Account information for the given credentials")
+        self.logging.error("Cannot find AWS Account information for the given credentials")
         return None
 
     def create_cluster(self, platform, cluster_name):

@@ -400,11 +400,11 @@ class Hypershift(Rosa):
         # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
         (acc_id_code, acc_id_out, acc_id_err) = self.utils.subprocess_exec("aws sts get-caller-identity --output json")
         if acc_id_code == 0:
-            acc_id = json.loads(acc_id_out)            
+            acc_id = json.loads(acc_id_out)
             return acc_id['Account']
         self.logging.error(f"Cannot find AWS Account information for the given credentials")
         return None
-        
+
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
@@ -550,7 +550,7 @@ class Hypershift(Rosa):
                 os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
                 os.environ["END_TIME"] = f"{cluster_end_time}"
                 self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
-                time.sleep(120)                
+                time.sleep(120)
                 self.utils.cluster_load(platform, cluster_name, load="index")
             # if cluster_load:
                 #     with all_clusters_installed:

@@ -19,4 +19,5 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 RUN unzip awscliv2.zip
 RUN ./aws/install
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+RUN curl --fail --retry 8 --retry-all-errors -sS -L "https://github.com/kube-burner/kube-burner/releases/download/v1.9.5/kube-burner-V1.9.5-linux-x86_64.tar.gz" | tar -xzC "/usr/local/bin/" kube-burner
 COPY . /

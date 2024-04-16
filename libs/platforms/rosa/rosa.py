@@ -490,8 +490,8 @@ class RosaArguments(PlatformArguments):
         EnvDefault = self.EnvDefault
 
         parser.add_argument("--rosa-env", action=EnvDefault, env=environment, default='staging', envvar="HCP_BURNER_ROSA_ENV", help="ROSA Environment")
-        parser.add_argument("--aws-account-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_AWS_ACCOUNT_FILE", help="File containing the AWS credentials")
-        parser.add_argument("--aws-profile", action=EnvDefault, env=environment, envvar="HCP_BURNER_AWS_PROFILE", help="Profile to use if aws file cointains more than one")
+        parser.add_argument("--aws-account-file", action=EnvDefault, env=environment, default='', envvar="HCP_BURNER_AWS_ACCOUNT_FILE", help="File containing the AWS credentials")
+        parser.add_argument("--aws-profile", action=EnvDefault, env=environment, default='localenv', envvar="HCP_BURNER_AWS_PROFILE", help="Profile to use if aws file cointains more than one")
         parser.add_argument("--aws-region", action=EnvDefault, env=environment, envvar="HCP_BURNER_AWS_REGION", default='us-east-2', help="Token to access OCM API")
         parser.add_argument("--oidc-config-id", action=EnvDefault, env=environment, envvar="HCP_BURNER_OIDC_CONFIG_ID", help="OIDC Config ID to be used on all the clusters")
         parser.add_argument("--common-operator-roles", action="store_true", help="Create one set of operator roles and use it on all clusters")
@@ -509,8 +509,6 @@ class RosaArguments(PlatformArguments):
             parser.set_defaults(**defaults)
 
         temp_args, temp_unknown_args = parser.parse_known_args()
-        if not temp_args.aws_account_file:
-            parser.error("hcp-burner.py: error: the following arguments (or equivalent definition) are required: --aws-account-file")
 
     class EnvDefault(argparse.Action):
         def __init__(self, env, envvar, default=None, **kwargs):

@@ -37,7 +37,7 @@ class AWS:
                 self.logging.debug(f"AWS Profile: {self.aws_config[profile]}")
         else:
             self.config_file = account_file
-            self.logging.info(f"AWS Account file is not provided, so aws environment variables are being used")
+            self.logging.info("AWS Account file is not provided, so aws environment variables are being used")
 
     def set_aws_envvars(self, profile, aws_region):
         """ Get AWS information from the account_file if provided and set related environment vars"""
@@ -53,7 +53,7 @@ class AWS:
         """ Get AWS information from the account_file if provided and save it on the environment object"""
         aws = {}
         if self.config_file == "":
-            self.logging.info(f"AWS Account file is not provided, so aws environment variables are being used")
+            self.logging.info("AWS Account file is not provided, so aws environment variables are being used")
             aws['aws_access_key_id'] = os.environ["AWS_ACCESS_KEY_ID"]
             aws['aws_secret_access_key'] = os.environ["AWS_SECRET_ACCESS_KEY"]
         else:

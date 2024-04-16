@@ -396,6 +396,15 @@ class Hypershift(Rosa):
         result.append("")
         return result
 
+    def _get_aws_account_id(self):
+        # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
+        (acc_id_code, acc_id_out, acc_id_err) = self.utils.subprocess_exec("aws sts get-caller-identity --output json")
+        if acc_id_code == 0:
+            acc_id = json.loads(acc_id_out)
+            return acc_id['Account']
+        self.logging.error("Cannot find AWS Account information for the given credentials")
+        return None
+
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
@@ -453,8 +462,9 @@ class Hypershift(Rosa):
         # Required by OCM-3187 (https://issues.redhat.com/browse/OCM-3187), remove when fixed
         self.logging.info(f"Getting kube-controller-manager role for cluster {cluster_name}")
         aws_role_name = self._get_aws_role_name(cluster_name)
+        aws_account_id = self._get_aws_account_id()
         self.logging.info(f"Found kube-controller-manager role {aws_role_name} for cluster {cluster_name}")
-        (aws_policy_code, aws_policy_out, aws_policy_err) = self.utils.subprocess_exec("aws iam attach-role-policy --role-name " + aws_role_name + " --policy-arn arn:aws:iam::415909267177:policy/hack-414-custom-policy")
+        (aws_policy_code, aws_policy_out, aws_policy_err) = self.utils.subprocess_exec("aws iam attach-role-policy --role-name " + aws_role_name + " --policy-arn arn:aws:iam::" + aws_account_id + ":policy/hack-414-custom-policy")
         if aws_policy_code != 0:
             cluster_info['status'] = "aws policy failed"
             return 1
@@ -539,6 +549,8 @@ class Hypershift(Rosa):
                 self.logging.info("Indexing Management cluster stats")
                 os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
                 os.environ["END_TIME"] = f"{cluster_end_time}"
+                self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
+                time.sleep(120)
                 self.utils.cluster_load(platform, cluster_name, load="index")
             # if cluster_load:
                 #     with all_clusters_installed:

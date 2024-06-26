@@ -132,8 +132,6 @@ class Utils:
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
             platform.environment["clusters"][cluster_name]["kubeconfig"] = platform.environment["clusters"][cluster_name]["path"] + "/kubeconfig"
             platform.environment['clusters'][cluster_name]['workers'] = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
-        cluster_mc = platform.get_mc(platform.get_cluster_id(cluster_name))
-        platform.environment["mc_kubeconfig"] = platform.environment["path"] + "/kubeconfig_" + cluster_mc
         return platform
 
     def load_scheduler(self, platform):
@@ -141,7 +139,7 @@ class Utils:
         self.logging.info(f"Attempting to start {platform.environment['load']['executor']} {platform.environment['load']['workload']} load process on {len(platform.environment['clusters'])} clusters")
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.debug(cluster_info)
-            if cluster_info['status'] == "ready":
+            if cluster_info['status'] in ("ready", "Completed"):
                 self.logging.info(f"Attempting to start load process on {cluster_name}")
                 try:
                     thread = threading.Thread(target=self.cluster_load, args=(platform, cluster_name))
@@ -216,7 +214,12 @@ class Utils:
         load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
         if not os.path.exists(my_path + '/workload'):
             self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
-            Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
+            try:
+                Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
+            except Exception as err:
+                self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
+                self.logging.error(err)
+                return 1
         # Copy executor to the local folder because we shaw in the past that we cannot use kube-burner with multiple executions at the same time
         shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
@@ -228,8 +231,8 @@ class Utils:
         log_file = load if load != "" else platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
         if not self.force_terminate:
-            load_code, load_out, load_err = self.subprocess_exec('./run.sh', my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': load_env})
+            load_code, load_out, load_err = self.subprocess_exec('./' + platform.environment['load']['script'], my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': load_env})
             if load_code != 0:
-                self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/run.sh'} on {cluster_name}")
+                self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/' + platform.environment['load']['script']} on {cluster_name}")
         else:
             self.logging.warning(f"Not starting workload on {cluster_name} after capturing Ctrl-C")

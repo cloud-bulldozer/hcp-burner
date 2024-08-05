@@ -25,7 +25,7 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--install-clusters", action="store_true", help="Start bringing up clusters")
 
-        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa"])
+        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa", "azure"])
         self.common_parser.add_argument("--subplatform", dest="subplatform", action=EnvDefault, env=environment, envvar="HCP_BURNER_SUBPLATFORM", help="Subplatforms of Platform")
 
         self.common_parser.add_argument("--uuid", action=EnvDefault, env=environment, envvar="HCP_BURNER_UUID")
@@ -53,7 +53,8 @@ class Arguments(argparse.ArgumentParser):
         self.common_parser.add_argument("--enable-workload", action="store_true", help="Execute workload after clusters are installed")
         self.common_parser.add_argument("--workload-repo", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_REPO", default="https://github.com/cloud-bulldozer/e2e-benchmarking.git", type=str, help="Git Repo of the workload")
         self.common_parser.add_argument("--workload", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD", help="Workload to execute after clusters are installed", default="cluster-density-ms")
-        self.common_parser.add_argument("--workload-script-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT_PATH", help="Workload to execute after clusters are installed", default="workloads/kube-burner-ocp-wrapper")
+        self.common_parser.add_argument("--workload-script", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT", help="Workload script to execute after clusters are installed", default="run.sh")
+        self.common_parser.add_argument("--workload-script-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT_PATH", help="Path to workload script", default="workloads/kube-burner-ocp-wrapper")
         self.common_parser.add_argument("--workload-executor", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXECUTOR", help="Complete path of binary used to execute the workload", default="/usr/bin/kube-burner")
         self.common_parser.add_argument("--workload-duration", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_DURATION", default="1h", type=str, help="Workload execution duration in minutes")
         self.common_parser.add_argument("--workload-jobs", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_JOBS", type=int, default=10, help="Jobs per worker.Workload will scale this number to the number of workers of the cluster")

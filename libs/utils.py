@@ -218,7 +218,8 @@ class Utils:
         # Copy executor to the local folder because we shaw in the past that we cannot use kube-burner with multiple executions at the same time
         shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
+        if load != "index":
+            load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"

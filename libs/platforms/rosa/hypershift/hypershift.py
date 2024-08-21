@@ -96,13 +96,34 @@ class Hypershift(Rosa):
         self.logging.error(f"No Provision Shard found for Service Cluster {self.environment['service_cluster']} on {self.environment['aws']['region']}")
         return None
 
-    def get_mc(self, cluster_id):
+    def _get_mc(self, cluster_id):
         self.logging.debug(f"Get the mgmt cluster of cluster {cluster_id}")
         resp_code, resp_out, resp_err = self.utils.subprocess_exec(
             "ocm get /api/clusters_mgmt/v1/clusters/" + cluster_id + "/hypershift",
             extra_params={"universal_newlines": True},
         )
         return json.loads(resp_out).get("management_cluster", None) if resp_code == 0 else None
+
+    # Get Hypershift cluster metadata and set required platform environment variables
+    def get_metadata(self, platform, cluster_name):
+        metadata = super().get_metadata(platform, cluster_name)
+        self.logging.info(f"Getting information for cluster {cluster_name}")
+        metadata_code, metadata_out, metadata_err = self.utils.subprocess_exec(
+            "rosa describe cluster -c " + cluster_name + " -o json",
+            extra_params={"universal_newlines": True}
+        )
+        try:
+            status = json.loads(metadata_out)["state"]
+        except Exception as err:
+            self.logging.error(f"Cannot load metadata for cluster {cluster_name}")
+            self.logging.error(err)
+
+        if status == "ready":
+            cluster_mc = self._get_mc(self.get_cluster_id(cluster_name))
+            metadata["mgmt_cluster_name"] = cluster_mc
+            platform.environment["mc_kubeconfig"] = platform.environment["path"] + "/kubeconfig_" + cluster_mc
+
+        return metadata
 
     def platform_cleanup(self):
         super().platform_cleanup()
@@ -268,7 +289,7 @@ class Hypershift(Rosa):
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["uuid"] = self.environment["uuid"]
         cluster_info["install_method"] = "rosa"
-        cluster_info["mgmt_cluster_name"] = self.get_mc(cluster_info["metadata"]["cluster_id"])
+        cluster_info["mgmt_cluster_name"] = self._get_mc(cluster_info["metadata"]["cluster_id"])
         self.logging.info(f"Deleting cluster {cluster_name} on Hypershift Platform")
         cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("rosa delete cluster -c " + cluster_name + " -y --watch", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
         cluster_delete_end_time = int(datetime.datetime.utcnow().timestamp())
@@ -473,7 +494,7 @@ class Hypershift(Rosa):
 
         cluster_info['status'] = "Installing"
         self.logging.info(f"Cluster {cluster_name} installation started on the {trying} try")
-        cluster_info["metadata"] = self.get_metadata(cluster_name)
+        cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
         cluster_info["install_try"] = trying
         with concurrent.futures.ThreadPoolExecutor() as executor:
             preflight_ch = executor.submit(self._preflight_wait, cluster_info["metadata"]["cluster_id"], cluster_name)
@@ -481,7 +502,7 @@ class Hypershift(Rosa):
             cluster_info["preflight_checks"] = preflight_ch.result()
             cluster_info["sc_namespace_timing"] = sc_namespace.result() - cluster_start_time if platform.environment["sc_kubeconfig"] != "" else None
 
-            mgmt_cluster_name = self.get_mc(cluster_info["metadata"]["cluster_id"])
+            mgmt_cluster_name = self._get_mc(cluster_info["metadata"]["cluster_id"])
             self.environment["mc_kubeconfig"] = self.download_kubeconfig(mgmt_cluster_name, self.environment["path"])
             mc_namespace = executor.submit(self._namespace_wait, platform.environment["mc_kubeconfig"], cluster_info["metadata"]["cluster_id"], cluster_name, "Management") if platform.environment["mc_kubeconfig"] != "" else 0
             cluster_info["mc_namespace_timing"] = mc_namespace.result() - cluster_start_time if platform.environment["mc_kubeconfig"] != "" else None
@@ -495,7 +516,7 @@ class Hypershift(Rosa):
             cluster_end_time = int(datetime.datetime.utcnow().timestamp())
             index_time = datetime.datetime.utcnow().isoformat()
             # Getting againg metadata to update the cluster status
-            cluster_info["metadata"] = self.get_metadata(cluster_name)
+            cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
             access_timers = self.get_cluster_admin_access(cluster_name, cluster_info["path"])
             cluster_info["kubeconfig"] = access_timers.get("kubeconfig", None)

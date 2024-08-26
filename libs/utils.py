@@ -127,13 +127,11 @@ class Utils:
             loop_counter += 1
             cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
             platform.environment["clusters"][cluster_name] = {}
-            platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(cluster_name)
+            platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(platform, cluster_name)
             platform.environment["clusters"][cluster_name]["status"] = platform.environment["clusters"][cluster_name]["metadata"]["status"]
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
             platform.environment["clusters"][cluster_name]["kubeconfig"] = platform.environment["clusters"][cluster_name]["path"] + "/kubeconfig"
             platform.environment['clusters'][cluster_name]['workers'] = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
-        cluster_mc = platform.get_mc(platform.get_cluster_id(cluster_name))
-        platform.environment["mc_kubeconfig"] = platform.environment["path"] + "/kubeconfig_" + cluster_mc
         return platform
 
     def load_scheduler(self, platform):
@@ -220,7 +218,8 @@ class Utils:
         # Copy executor to the local folder because we shaw in the past that we cannot use kube-burner with multiple executions at the same time
         shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
+        if load != "index":
+            load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"

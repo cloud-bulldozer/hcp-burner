@@ -174,7 +174,7 @@ class Terraform(Rosa):
 
         cluster_info['status'] = "installed"
         self.logging.info(f"Cluster {cluster_name} installation finished on the {trying} try")
-        cluster_info["metadata"] = self.get_metadata(cluster_name)
+        cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
         cluster_info["install_try"] = trying
         cluster_info["install_duration"] = cluster_end_time - cluster_start_time
         access_timers = self.get_cluster_admin_access(cluster_name, cluster_info["path"])

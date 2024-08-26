@@ -184,6 +184,9 @@ class Platform:
     def delete_cluster(self, platform, cluster_name):
         pass
 
+    def get_metadata(self, platform, cluster_name):
+        pass
+
     def platform_cleanup(self):
         pass
 

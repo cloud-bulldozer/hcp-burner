@@ -200,7 +200,8 @@ class Rosa(Platform):
         super().get_workers_ready(kubeconfig, cluster_name)
         return Platform.get_workers_ready(self, kubeconfig, cluster_name)
 
-    def get_metadata(self, cluster_name):
+    def get_metadata(self, platform, cluster_name):
+        super().get_metadata(platform, cluster_name)
         metadata = {}
         self.logging.info(f"Getting information for cluster {cluster_name}")
         metadata_code, metadata_out, metadata_err = self.utils.subprocess_exec("rosa describe cluster -c " + cluster_name + " -o json", extra_params={"universal_newlines": True})

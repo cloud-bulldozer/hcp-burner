@@ -97,7 +97,7 @@ class Azure(Platform):
     def get_metadata(self, platform, cluster_name):
         super().get_metadata(platform, cluster_name)
         metadata = {}
-        ## TODO Implement metadata logic when ready to use
+        # TODO Implement metadata logic when ready to use
         return metadata
 
     def watcher(self):

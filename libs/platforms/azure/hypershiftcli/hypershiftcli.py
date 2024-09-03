@@ -129,8 +129,8 @@ class Hypershiftcli(Azure):
         self.logging.debug(self.environment['clusters'])
         self.logging.info("Watcher terminated")
 
-    def get_metadata(self, cluster_name):
-        metadata = {}
+    def get_metadata(self, platform, cluster_name):
+        metadata = super().get_metadata(platform, cluster_name)
         self.logging.info(f"Getting information for cluster {cluster_name} from {self.environment['mgmt_cluster_name']}")
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
@@ -351,7 +351,7 @@ class Hypershiftcli(Azure):
                 break
         cluster_info['status'] = "Created"
         self.logging.info(f"Cluster {cluster_name} installation finished on the {trying} try")
-        cluster_info["metadata"] = self.get_metadata(cluster_name)
+        cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
         cluster_info["install_try"] = trying
 #        mc_namespace = executor.submit(self._namespace_wait, platform.environment["mc_kubeconfig"], cluster_info["metadata"]["cluster_id"], cluster_name, "Management") if platform.environment["mc_kubeconfig"] != "" else 0
 #        cluster_info["mc_namespace_timing"] = mc_namespace.result() - cluster_start_time if platform.environment["mc_kubeconfig"] != "" else None
@@ -359,7 +359,7 @@ class Hypershiftcli(Azure):
         cluster_end_time = int(datetime.datetime.utcnow().timestamp())
         index_time = datetime.datetime.utcnow().isoformat()
         # # Getting againg metadata to update the cluster status
-        cluster_info["metadata"] = self.get_metadata(cluster_name)
+        cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
         cluster_info["install_duration"] = cluster_end_time - cluster_start_time
         self.logging.info(f"Waiting 60 minutes until cluster {cluster_name} status on {self.environment['mgmt_cluster_name']} will be completed")
         cluster_info["cluster_ready"] = self.wait_for_cluster_ready(cluster_name, 60)
@@ -405,12 +405,12 @@ class Hypershiftcli(Azure):
         if self.es is not None:
             cluster_info["timestamp"] = index_time
             self.es.index_metadata(cluster_info)
-#            self.logging.info("Indexing Management cluster stats")
-#            os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
-#            os.environ["END_TIME"] = f"{cluster_end_time}"
+            self.logging.info("Indexing Management cluster stats")
+            os.environ["START_TIME"] = f"{cluster_start_time}"
+            os.environ["END_TIME"] = f"{cluster_end_time}"
             self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
             time.sleep(120)
-#            self.utils.cluster_load(platform, cluster_name, load="index")
+            self.utils.cluster_load(platform, cluster_name, load="index")
 
     def _namespace_wait(self, kubeconfig, cluster_id, cluster_name, type):
         start_time = int(datetime.datetime.utcnow().timestamp())

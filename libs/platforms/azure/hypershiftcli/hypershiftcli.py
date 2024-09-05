@@ -312,7 +312,7 @@ class Hypershiftcli(Azure):
         self.logging.debug("Output directory set to %s" % cluster_info["path"])
 
         # Create the resource group
-        rg_create_code, rg_create_out, rg_create_err = self.utils.subprocess_exec("az group create --subscription " + self.environment['subscription_id'] + " --location " + self.environment['azure_region'] + " --name rg-" + cluster_name, cluster_info["path"] + "/az_group_create.log")
+        rg_create_code, rg_create_out, rg_create_err = self.utils.subprocess_exec("az group create --subscription " + self.environment['subscription_id'] + " --location " + self.environment['azure_region'] + " --name rg-" + cluster_name + " --tags TicketId=471", cluster_info["path"] + "/az_group_create.log")
         if rg_create_code != 0:
             self.logging.error(f"Failed to create the azure resource group rg_{cluster_name} for cluster {cluster_name}")
             return 1

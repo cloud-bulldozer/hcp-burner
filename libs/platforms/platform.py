@@ -52,13 +52,13 @@ class Platform:
         self.environment["workers_wait_time"] = (
             arguments["workers_wait_time"] if arguments["wait_for_workers"] else None
         )
-        if arguments["install_clusters"].lower() == "true":
+        if str(arguments["install_clusters"]).lower() == "true":
             self.environment["install_clusters"] = True
         else:
             self.environment["install_clusters"] = False
 
         self.environment['load'] = {}
-        if arguments['enable_workload'].lower() == "true":
+        if str(arguments['enable_workload']).lower() == "true":
             self.environment['load']['enabled'] = "true"
 
         self.environment['load']["workload"] = arguments["workload"]
@@ -76,7 +76,7 @@ class Platform:
 
         self.environment["wildcard_options"] = arguments["wildcard_options"]
 
-        if arguments["cleanup_clusters"].lower() == "true":
+        if str(arguments["cleanup_clusters"]).lower() == "true":
             self.environment["cleanup_clusters"] = True
             self.environment["wait_before_cleanup"] = arguments["wait_before_cleanup"]
             self.environment["delay_between_cleanup"] = arguments[

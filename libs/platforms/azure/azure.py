@@ -94,6 +94,12 @@ class Azure(Platform):
         super().get_workers_ready(kubeconfig, cluster_name)
         return Platform.get_workers_ready(self, kubeconfig, cluster_name)
 
+    def get_metadata(self, platform, cluster_name):
+        super().get_metadata(platform, cluster_name)
+        metadata = {}
+        # TODO Implement metadata logic when ready to use
+        return metadata
+
     def watcher(self):
         super().watcher()
 

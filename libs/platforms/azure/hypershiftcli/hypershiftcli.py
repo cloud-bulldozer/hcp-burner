@@ -191,6 +191,7 @@ class Hypershiftcli(Azure):
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
         cluster_info['mgmt_cluster_name'] = self.environment['mgmt_cluster_name']
         cluster_info["install_method"] = "hypershiftcli"
         cluster_info['resource_group_name'] = "rg-" + cluster_name
@@ -225,7 +226,6 @@ class Hypershiftcli(Azure):
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_destroy.json file located at {cluster_info['path']}")
         if self.es is not None:
-            cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
             self.es.index_metadata(cluster_info)
 
     def wait_for_cluster_ready(self, cluster_name, wait_time):
@@ -302,6 +302,7 @@ class Hypershiftcli(Azure):
         myenv["KUBECONFIG"] = self.environment['mc_kubeconfig']
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
         cluster_info["hostedclusters"] = self.environment["cluster_count"]
         cluster_info["install_method"] = "hypershiftcli"
         cluster_info['mgmt_cluster_name'] = self.environment['mgmt_cluster_name']
@@ -357,7 +358,6 @@ class Hypershiftcli(Azure):
 #        cluster_info["mc_namespace_timing"] = mc_namespace.result() - cluster_start_time if platform.environment["mc_kubeconfig"] != "" else None
 #        cluster_start_time_on_mc = mc_namespace.result()
         cluster_end_time = int(datetime.datetime.utcnow().timestamp())
-        index_time = datetime.datetime.utcnow().isoformat()
         # # Getting againg metadata to update the cluster status
         cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
         cluster_info["install_duration"] = cluster_end_time - cluster_start_time
@@ -403,7 +403,6 @@ class Hypershiftcli(Azure):
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
         if self.es is not None:
-            cluster_info["timestamp"] = index_time
             self.es.index_metadata(cluster_info)
             self.logging.info("Indexing Management cluster stats")
             os.environ["START_TIME"] = f"{cluster_start_time}"

@@ -140,6 +140,8 @@ class Hypershiftcli(Azure):
         except Exception as err:
             self.logging.error(f"Cannot load metadata for cluster {cluster_name} from {self.environment['mgmt_cluster_name']}")
             self.logging.error(err)
+            metadata['status'] = "not found"
+            return metadata
         metadata["cluster_name"] = result.get("metadata", {}).get("name", None)
         metadata["cluster_id"] = result.get("spec", {}).get("clusterID", None)
         metadata["network_type"] = result.get("spec", {}).get("networking", {}).get("networkType", None)
@@ -225,8 +227,33 @@ class Hypershiftcli(Azure):
         except Exception as err:
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_destroy.json file located at {cluster_info['path']}")
-        if self.es is not None:
-            self.es.index_metadata(cluster_info)
+        self.es.index_metadata(cluster_info) if self.es is not None else None
+
+    def wait_for_controlplane_ready(self, cluster_name, wait_time):
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = self.environment['mc_kubeconfig']
+        starting_time = datetime.datetime.utcnow().timestamp()
+        while datetime.datetime.utcnow().timestamp() < starting_time + wait_time * 60:
+            if self.utils.force_terminate:
+                self.logging.error(f"Exiting install times capturing on {cluster_name} cluster after capturing Ctrl-C")
+                return 0
+            self.logging.info(f"Getting cluster information for cluster {cluster_name} on {self.environment['mgmt_cluster_name']}")
+            cluster_status_code, cluster_status_out, cluster_status_err = self.utils.subprocess_exec("oc get hostedcluster -n clusters " + cluster_name + " -o json", extra_params={"env": myenv, "universal_newlines": True})
+            current_time = int(datetime.datetime.utcnow().timestamp())
+            try:
+                cluster_status = json.loads(cluster_status_out).get("status", {}).get("conditions", [])
+            except Exception as err:
+                self.logging.error(f"Cannot load command result for cluster {cluster_name}. Waiting 1 seconds for next check...")
+                self.logging.error(err)
+                time.sleep(1)
+                continue
+            if any(item["message"] == "The hosted control plane is available" and item["status"] == "True" for item in cluster_status):
+                time_to_completed = int(round(current_time - starting_time, 0))
+                self.logging.info(f"Control Plane for cluster {cluster_name} is ready after {time_to_completed} seconds")
+                return time_to_completed
+            else:
+                self.logging.info(f"Control Plane for cluster {cluster_name} not ready after {int(round(current_time - starting_time, 0))} seconds, waiting 1 second for the next check")
+                time.sleep(1)
 
     def wait_for_cluster_ready(self, cluster_name, wait_time):
         myenv = os.environ.copy()
@@ -259,7 +286,8 @@ class Hypershiftcli(Azure):
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = kubeconfig
         result = [machinepool_name]
-        starting_time = datetime.datetime.utcnow().timestamp()
+
+        starting_time = int(datetime.datetime.utcnow().timestamp())
         self.logging.debug(f"Waiting {wait_time} minutes for nodes to be Ready on cluster {cluster_name} until {datetime.datetime.fromtimestamp(starting_time + wait_time * 60)}")
         while datetime.datetime.utcnow().timestamp() < starting_time + wait_time * 60:
             if self.utils.force_terminate:
@@ -286,7 +314,7 @@ class Hypershiftcli(Azure):
             if ready_nodes == worker_nodes:
                 self.logging.info(f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Stopping wait.")
                 result.append(ready_nodes)
-                result.append(int(datetime.datetime.utcnow().timestamp()))
+                result.append(int(datetime.datetime.utcnow().timestamp()) - starting_time)
                 return result
             else:
                 self.logging.info(f"Found {ready_nodes}/{worker_nodes} ready nodes on machinepool {machinepool_name} for cluster {cluster_name}. Waiting 15 seconds for next check...")
@@ -316,6 +344,8 @@ class Hypershiftcli(Azure):
         rg_create_code, rg_create_out, rg_create_err = self.utils.subprocess_exec("az group create --subscription " + self.environment['subscription_id'] + " --location " + self.environment['azure_region'] + " --name rg-" + cluster_name + " --tags TicketId=471", cluster_info["path"] + "/az_group_create.log")
         if rg_create_code != 0:
             self.logging.error(f"Failed to create the azure resource group rg_{cluster_name} for cluster {cluster_name}")
+            cluster_info["status"] = "Not Created"
+            self.es.index_metadata(cluster_info) if self.es is not None else None
             return 1
         else:
             self.logging.info(f"Azure resource group rg-{cluster_name} created")
@@ -330,6 +360,8 @@ class Hypershiftcli(Azure):
         while trying <= 5:
             if self.utils.force_terminate:
                 self.logging.error(f"Exiting cluster creation for {cluster_name} after capturing Ctrl-C")
+                cluster_info["status"] = "Force terminated"
+                self.es.index_metadata(cluster_info) if self.es is not None else None
                 return 0
             self.logging.info("Cluster Create Command:")
             self.logging.info(cluster_cmd)
@@ -347,6 +379,7 @@ class Hypershiftcli(Azure):
                     cluster_info["status"] = "Not Created"
                     self.logging.error(f"Cluster {cluster_name} installation failed after 5 retries")
                     self.logging.debug(create_cluster_out)
+                    self.es.index_metadata(cluster_info) if self.es is not None else None
                     return 1
             else:
                 break
@@ -361,13 +394,15 @@ class Hypershiftcli(Azure):
         # # Getting againg metadata to update the cluster status
         cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
         cluster_info["install_duration"] = cluster_end_time - cluster_start_time
-        self.logging.info(f"Waiting 60 minutes until cluster {cluster_name} status on {self.environment['mgmt_cluster_name']} will be completed")
-        cluster_info["cluster_ready"] = self.wait_for_cluster_ready(cluster_name, 60)
+        self.logging.info(f"Waiting up to 10 minutes until cluster {cluster_name} control plane will be ready on {self.environment['mgmt_cluster_name']}")
+        cluster_info["cluster_controlplane_ready_delta"] = self.wait_for_controlplane_ready(cluster_name, 10)
+        cluster_info["cluster_controlplane_ready_total"] = sum(x or 0 for x in [cluster_info["install_duration"], cluster_info["cluster_controlplane_ready_delta"]])
         cluster_info["kubeconfig"] = self.download_kubeconfig(cluster_name, cluster_info["path"])
         if not cluster_info["kubeconfig"]:
             self.logging.error(f"Failed to download kubeconfig file for cluster {cluster_name}. Disabling wait for workers and workload execution")
             cluster_info["workers_wait_time"] = None
             cluster_info["status"] = "Completed. Not Access"
+            self.es.index_metadata(cluster_info) if self.es is not None else None
             return 1
         if cluster_info["workers_wait_time"]:
             self.logging.info("Starting waiting for worker creation...")
@@ -380,20 +415,27 @@ class Hypershiftcli(Azure):
                     if result[0] == cluster_name:
                         default_pool_workers = int(result[1])
                         if default_pool_workers == cluster_info["workers"]:
-                            cluster_info["workers_ready"] = result[2] - cluster_start_time
+                            cluster_info["workers_ready_delta"] = result[2]
+                            cluster_info["workers_ready_total"] = sum(x or 0 for x in [cluster_info["cluster_controlplane_ready_total"], cluster_info["workers_ready_delta"]])
                         else:
                             cluster_info['workers_ready'] = None
                             cluster_info['status'] = "Completed, missing workers"
+                            self.es.index_metadata(cluster_info) if self.es is not None else None
                             return 1
                     else:
                         extra_pool_workers = int(result[1])
                         if "extra_machinepool" in platform.environment and extra_pool_workers == platform.environment["extra_machinepool"]["replicas"]:
                             # cluster_info["extra_pool_workers_ready"] = result[2] - extra_machine_pool_start_time
-                            cluster_info["extra_pool_workers_ready"] = result[2] - cluster_start_time
+                            cluster_info["extra_pool_workers_ready_delta"] = result[2]
+                            cluster_info["extra_pool_workers_ready_total"] = sum(x or 0 for x in [cluster_info["cluster_controlplane_ready_total"], cluster_info["extra_poolworkers_ready_delta"]])
                         else:
                             cluster_info["extra_pool_workers_ready"] = None
                             cluster_info['status'] = "Completed, missing extra pool workers"
+                            self.es.index_metadata(cluster_info) if self.es is not None else None
                             return 1
+        self.logging.info(f"Waiting 60 minutes until cluster {cluster_name} status on {self.environment['mgmt_cluster_name']} will be completed")
+        cluster_info["cluster_ready_delta"] = self.wait_for_cluster_ready(cluster_name, 60)
+        cluster_info["cluster_ready_total"] = sum(x or 0 for x in [cluster_info["workers_ready_total"], cluster_info["cluster_ready_delta"]])
         cluster_info['status'] = "Completed"
         cluster_info["metadata"]["mgmt_cluster"] = self.get_az_aks_cluster_info(self.environment['mgmt_cluster_name'], self.environment["mc_resource_group"])
         try:

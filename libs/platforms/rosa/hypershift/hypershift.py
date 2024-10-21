@@ -288,6 +288,7 @@ class Hypershift(Rosa):
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
         cluster_info["install_method"] = "rosa"
         cluster_info["mgmt_cluster_name"] = self._get_mc(cluster_info["metadata"]["cluster_id"])
         self.logging.info(f"Deleting cluster {cluster_name} on Hypershift Platform")
@@ -329,7 +330,6 @@ class Hypershift(Rosa):
             self.logging.error(err)
             self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
         if self.es is not None:
-            cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
             self.es.index_metadata(cluster_info)
 
     def _get_aws_role_name(self, cluster_name):
@@ -430,6 +430,7 @@ class Hypershift(Rosa):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
+        cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
         cluster_info["hostedclusters"] = self.environment["cluster_count"]
         cluster_info["environment"] = self.environment["rosa_env"]
         cluster_info["install_method"] = "rosa"
@@ -514,7 +515,6 @@ class Hypershift(Rosa):
         else:
             cluster_info['status'] = "installed"
             cluster_end_time = int(datetime.datetime.utcnow().timestamp())
-            index_time = datetime.datetime.utcnow().isoformat()
             # Getting againg metadata to update the cluster status
             cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
@@ -565,7 +565,6 @@ class Hypershift(Rosa):
                 self.logging.error(err)
                 self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
             if self.es is not None:
-                cluster_info["timestamp"] = index_time
                 self.es.index_metadata(cluster_info)
                 self.logging.info("Indexing Management cluster stats")
                 os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations

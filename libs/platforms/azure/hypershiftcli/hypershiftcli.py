@@ -170,20 +170,30 @@ class Hypershiftcli(Azure):
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = self.environment['mc_kubeconfig']
         self.logging.debug(f"Downloading kubeconfig file for Cluster {cluster_name} from {self.environment['mgmt_cluster_name']} on {path}/kubeconfig")
-        kubeconfig_code, kubeconfig_out, kubeconfig_err = self.utils.subprocess_exec("oc get secret -n clusters " + cluster_name + "-admin-kubeconfig -o json", extra_params={"cwd": path, "env": myenv, "universal_newlines": True})
-        if kubeconfig_code == 0:
-            try:
-                kubeconfig = base64.b64decode(json.loads(kubeconfig_out).get("data", {}).get("kubeconfig", None)).decode("utf-8")
-            except Exception as err:
-                self.logging.error(f"Cannot load kubeconfig for cluster {cluster_name} from {self.environment['mgmt_cluster_name']}")
-                self.logging.error(err)
-                self.logging.debug(kubeconfig_out)
+        starting_time = datetime.datetime.utcnow().timestamp()
+        while datetime.datetime.utcnow().timestamp() < starting_time + 5 * 60:
+            if self.utils.force_terminate:
+                self.logging.error(f"Exiting kubeconfig downloading on {cluster_name} cluster after capturing Ctrl-C")
                 return None
-            kubeconfig_path = path + "/kubeconfig"
-            with open(kubeconfig_path, "w") as kubeconfig_file:
-                kubeconfig_file.write(kubeconfig)
-            self.logging.debug(f"Downloaded kubeconfig file for Cluster {cluster_name} and stored at {path}/kubeconfig")
-            return kubeconfig_path
+            kubeconfig_code, kubeconfig_out, kubeconfig_err = self.utils.subprocess_exec("oc get secret -n clusters " + cluster_name + "-admin-kubeconfig -o json", extra_params={"cwd": path, "env": myenv, "universal_newlines": True})
+            if kubeconfig_code == 0:
+                try:
+                    kubeconfig = base64.b64decode(json.loads(kubeconfig_out).get("data", {}).get("kubeconfig", None)).decode("utf-8")
+                except Exception as err:
+                    self.logging.error(f"Cannot load kubeconfig for cluster {cluster_name} from {self.environment['mgmt_cluster_name']}. Waiting 5 seconds for the next try...")
+                    self.logging.error(err)
+                    self.logging.debug(kubeconfig_out)
+                    time.sleep(5)
+                    continue
+                kubeconfig_path = path + "/kubeconfig"
+                with open(kubeconfig_path, "w") as kubeconfig_file:
+                    kubeconfig_file.write(kubeconfig)
+                self.logging.debug(f"Downloaded kubeconfig file for Cluster {cluster_name} and stored at {path}/kubeconfig")
+                return kubeconfig_path
+            else:
+                self.logging.warning(f"Failed to download kubeconfig file for cluster {cluster_name}. Waiting 5 seconds for the next try...")
+                time.sleep(5)
+        self.logging.error(f"Failed to download kubeconfig file for cluster {cluster_name} after 5 minutes.")
         return None
 
     def delete_cluster(self, platform, cluster_name):

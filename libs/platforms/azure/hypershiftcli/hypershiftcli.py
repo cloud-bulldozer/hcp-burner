@@ -32,6 +32,7 @@ class Hypershiftcli(Azure):
         self.environment["workers"] = arguments["workers"]
         self.environment["mc_kubeconfig"] = arguments["mc_kubeconfig"]
         self.environment["mc_resource_group"] = arguments["mc_az_resource_group"]
+        self.environment['mgmt_cluster_name'] = arguments["mc_cluster_name"]
 
     def initialize(self):
         super().initialize()
@@ -44,14 +45,6 @@ class Hypershiftcli(Azure):
             self.logging.error(f"Failed to list hosted clusters using {self.environment['mc_kubeconfig']} file")
             sys.exit("Exiting...")
         else:
-            cluster_info_code, cluster_info_out, cluster_info_err = self.utils.subprocess_exec("kubectl config view -o json", extra_params={"env": myenv, "universal_newlines": True}, log_output=False)
-            try:
-                cluster_info_json = json.loads(cluster_info_out)
-            except Exception as err:
-                self.logging.debug(f"Cannot load cluster info using {self.environment['mc_kubeconfig']} file")
-                sys.exit("Exiting...")
-                self.logging.debug(err)
-            self.environment['mgmt_cluster_name'] = cluster_info_json['current-context']
             self.logging.info(f"Access to MC cluster {self.environment['mgmt_cluster_name']} verified using {self.environment['mc_kubeconfig']} file")
 
     def platform_cleanup(self):
@@ -533,6 +526,7 @@ class HypershiftcliArguments(AzureArguments):
         super().__init__(parser, config_file, environment)
         EnvDefault = self.EnvDefault
 
+        parser.add_argument("--mc-cluster-name", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_CLUSTER_NAME", default='aro-hcp-mgmt-cluster', help="Azure cluster name of the MC Cluster")
         parser.add_argument("--mc-kubeconfig", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_KUBECONFIG", help="Kubeconfig file for the MC Cluster")
         parser.add_argument("--mc-az-resource-group", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_RESOURCE_GROUP", help="Azure Resource group where MC is installed")
 

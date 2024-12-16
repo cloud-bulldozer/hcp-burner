@@ -215,8 +215,8 @@ class Hypershift(Rosa):
                     else:
                         # preparing vpcs dict with network and subnet details
                         for cluster in range(vpcs_to_create):
-                            # internal loop iterates over number of cluster per vpc 
-                            # if cluster_per_pvc is set to 2, first 2 clusters share the same VPC                            
+                            # internal loop iterates over number of cluster per vpc
+                            # if cluster_per_pvc is set to 2, first 2 clusters share the same VPC
                             for itr in range(self.environment["clusters_per_vpc"]):
                                 vpc_id = json_output["outputs"]["vpc-id"]["value"][cluster]
                                 public_subnets = json_output["outputs"][

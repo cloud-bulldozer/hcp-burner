@@ -59,6 +59,10 @@ class Hypershift(Rosa):
         self.logging.info("Verifying OIDC config")
         sys.exit("Exiting") if not self._set_oidc_config() else self.logging.info(f"Using {self.environment['oidc_config_id']} as OIDC config ID")
 
+        # Create Account roles
+        self.logging.info("Creating ROSA Account roles")
+        sys.exit("Exiting") if not self._create_rosa_account_roles() else self.logging.info("Created Account roles successfully")
+
         # Set Operator Roles
         self.logging.info("Verifying Operator Roles")
         if self.environment["common_operator_roles"]:

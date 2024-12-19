@@ -130,6 +130,18 @@ class Rosa(Platform):
             self.logging.info(f"Deleted oidc-config ID {self.environment['oidc_config_id']}")
             return True
 
+    def _create_rosa_account_roles(self):
+        hc_acc_rol_code, hc_acc_rol_out, hc_acc_rol_err = self.utils.subprocess_exec(
+            "rosa create account-roles --hosted-cp --prefix ManagedOpenShift -y --mode auto",
+            extra_params={"universal_newlines": True}
+        )
+        if hc_acc_rol_code != 0:
+            self.logging.error("Failed to create rosa account roles")
+            return False
+        else:
+            self.logging.info("Create account roles successfully")
+        return True
+
     def _create_operator_roles(self):
         self.logging.info("Finding latest installer Role ARN")
         roles_code, roles_out, roles_err = self.utils.subprocess_exec("rosa list account-roles -o json")

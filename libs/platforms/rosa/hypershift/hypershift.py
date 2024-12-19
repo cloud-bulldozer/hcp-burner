@@ -152,7 +152,7 @@ class Hypershift(Rosa):
                 myenv["TF_VAR_cluster_name_seed"] = self.environment[
                     "cluster_name_seed"
                 ]
-                myenv["TF_VAR_cluster_count"] = str(self.environment["cluster_count"])
+                myenv["TF_VAR_cluster_count"] = str(vpcs_to_create)
                 myenv["TF_VAR_aws_region"] = self.environment["aws"]["region"]
                 apply_code, apply_out, apply_err = self.utils.subprocess_exec(
                     "terraform apply --auto-approve",
@@ -190,9 +190,9 @@ class Hypershift(Rosa):
                         json_output["outputs"]["cluster-private-subnets"]["value"]
                     )
                     if (
-                        number_of_vpcs != self.environment["cluster_count"]
-                        or number_of_public != self.environment["cluster_count"]
-                        or number_of_private != self.environment["cluster_count"]
+                        number_of_vpcs != vpcs_to_create
+                        or number_of_public != vpcs_to_create
+                        or number_of_private != vpcs_to_create
                     ):
                         self.logging.info(
                             "Required Clusters: %d" % self.environment["cluster_count"]
@@ -204,42 +204,49 @@ class Hypershift(Rosa):
                         self.logging.info(
                             "Number of Public Subnets: %d" % number_of_public
                         )
+                        self.logging.info(
+                            "Number of Clusters per VPC: %d" % self.environment["clusters_per_vpc"]
+                        )
                         self.logging.warning(
                             "Try %d: Not all resources has been created. retring in 15 seconds"
                             % trying
                         )
                         time.sleep(15)
                     else:
-                        for cluster in range(self.environment["cluster_count"]):
-                            vpc_id = json_output["outputs"]["vpc-id"]["value"][cluster]
-                            public_subnets = json_output["outputs"][
-                                "cluster-public-subnets"
-                            ]["value"][cluster]
-                            private_subnets = json_output["outputs"][
-                                "cluster-private-subnets"
-                            ]["value"][cluster]
-                            if len(public_subnets) != 3 or len(private_subnets) != 3:
-                                self.logging.warning(
-                                    "Try: %d. Number of public subnets of VPC %s: %d (required: 3)"
-                                    % (trying, vpc_id, len(public_subnets))
-                                )
-                                self.logging.warning(
-                                    "Try: %d. Number of private subnets of VPC %s: %d (required: 3)"
-                                    % (trying, vpc_id, len(private_subnets))
-                                )
-                                self.logging.warning(
-                                    "Try: %d: Not all subnets created, retring in 15 seconds"
-                                    % trying
-                                )
-                                time.sleep(15)
-                            else:
-                                self.logging.debug(
-                                    "VPC ID: %s, Public Subnet: %s, Private Subnet: %s"
-                                    % (vpc_id, public_subnets, private_subnets)
-                                )
-                                subnets = ",".join(public_subnets)
-                                subnets = subnets + "," + ",".join(private_subnets)
-                                vpcs.append((vpc_id, subnets))
+                        # preparing vpcs dict with network and subnet details
+                        for cluster in range(vpcs_to_create):
+                            # internal loop iterates over number of cluster per vpc
+                            # if cluster_per_pvc is set to 2, first 2 clusters share the same VPC
+                            for itr in range(self.environment["clusters_per_vpc"]):
+                                vpc_id = json_output["outputs"]["vpc-id"]["value"][cluster]
+                                public_subnets = json_output["outputs"][
+                                    "cluster-public-subnets"
+                                ]["value"][cluster]
+                                private_subnets = json_output["outputs"][
+                                    "cluster-private-subnets"
+                                ]["value"][cluster]
+                                if len(public_subnets) != 3 or len(private_subnets) != 3:
+                                    self.logging.warning(
+                                        "Try: %d. Number of public subnets of VPC %s: %d (required: 3)"
+                                        % (trying, vpc_id, len(public_subnets))
+                                    )
+                                    self.logging.warning(
+                                        "Try: %d. Number of private subnets of VPC %s: %d (required: 3)"
+                                        % (trying, vpc_id, len(private_subnets))
+                                    )
+                                    self.logging.warning(
+                                        "Try: %d: Not all subnets created, retring in 15 seconds"
+                                        % trying
+                                    )
+                                    time.sleep(15)
+                                else:
+                                    self.logging.debug(
+                                        "VPC ID: %s, Public Subnet: %s, Private Subnet: %s"
+                                        % (vpc_id, public_subnets, private_subnets)
+                                    )
+                                    subnets = ",".join(public_subnets)
+                                    subnets = subnets + "," + ",".join(private_subnets)
+                                    vpcs.append((vpc_id, subnets))
                         return vpcs
                 else:
                     self.logging.warning(
@@ -441,8 +448,8 @@ class Hypershift(Rosa):
         self.logging.debug("Output directory set to %s" % cluster_info["path"])
         cluster_cmd = ["rosa", "create", "cluster", "--cluster-name", cluster_name, "--replicas", str(cluster_info["workers"]), "--hosted-cp", "--sts", "--mode", "auto", "-y", "--output", "json", "--oidc-config-id", platform.environment["oidc_config_id"], "--region", platform.environment["aws"]["region"]]
         if platform.environment["create_vpcs"]:
-            self.logging.debug(platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])])
-            cluster_info["vpc"] = platform.environment["vpcs"][(cluster_info["index"] - 1) % len(platform.environment["vpcs"])]
+            self.logging.debug(platform.environment["vpcs"][(cluster_info["index"])])
+            cluster_info["vpc"] = platform.environment["vpcs"][(cluster_info["index"])]
             cluster_cmd.append("--subnet-ids")
             cluster_cmd.append(cluster_info["vpc"][1])
         if "shard_id" in platform.environment:

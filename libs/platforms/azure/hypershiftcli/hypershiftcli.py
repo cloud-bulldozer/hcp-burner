@@ -526,7 +526,7 @@ class HypershiftcliArguments(AzureArguments):
         super().__init__(parser, config_file, environment)
         EnvDefault = self.EnvDefault
 
-        parser.add_argument("--mc-cluster-name", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_CLUSTER_NAME", default='aro-hcp-mgmt-cluster', help="Azure cluster name of the MC Cluster")
+        parser.add_argument("--mc-cluster-name", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_CLUSTER_NAME", default='aro-hcp-aks', help="Azure cluster name of the MC Cluster")
         parser.add_argument("--mc-kubeconfig", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_KUBECONFIG", help="Kubeconfig file for the MC Cluster")
         parser.add_argument("--mc-az-resource-group", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_MC_RESOURCE_GROUP", help="Azure Resource group where MC is installed")
 

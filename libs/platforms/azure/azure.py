@@ -30,13 +30,14 @@ class Azure(Platform):
             self.logging.info(f"Azure Credentials File {self.environment['azure_credentials_file']} verified")
         with open(self.environment["azure_credentials_file"], 'r') as azure_credentials_file:
             for line in azure_credentials_file:
-                if line.startswith('subscriptionId:'):
-                    self.environment['subscription_id'] = line.split(':', 1)[1].strip().strip('"')
+                if "subscriptionId" in line:
+                    self.logging.debug(f"Found subscriptionId {line} on Azure credentials file {self.environment['azure_credentials_file']}")
+                    self.environment['subscription_id'] = line.split(':', 1)[1].strip().strip('"\',')
         # Verify Azure Login and subscription
         self.logging.info("Getting azure subscriptions using  `az account list`")
         az_account_code, az_account_out, az_account_err = self.utils.subprocess_exec("az account list")
         sys.exit("Exiting...") if az_account_code != 0 else self.logging.info("`az account list` execution OK")
-
+        self.logging.debug(f"SubscriptionID: {self.environment['subscription_id']}")
         for subscription in json.loads(az_account_out):
             if subscription["id"] == self.environment["subscription_id"]:
                 az_account_set_code, az_account_set_out, az_account_set_err = self.utils.subprocess_exec("az account set --subscription " + subscription["id"])

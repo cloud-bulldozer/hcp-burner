@@ -103,17 +103,18 @@ class Platform:
         self.logging.info(f"Initializing platform {self.environment['platform']}")
 
         # OCM Login
-        self.logging.info("Attempting to log in OCM using `ocm login`")
-        ocm_login_command = (
-            "ocm login --url="
-            + self.environment["ocm_url"]
-            + " --token="
-            + self.environment["ocm_token"]
-        )
-        ocm_code, ocm_out, ocm_err = self.utils.subprocess_exec(ocm_login_command)
-        sys.exit("Exiting...") if ocm_code != 0 else self.logging.info(
-            "`ocm login` execution OK"
-        )
+        if self.environment["ocm_token"]:
+            self.logging.info("Attempting to log in OCM using `ocm login`")
+            ocm_login_command = (
+                "ocm login --url="
+                + self.environment["ocm_url"]
+                + " --token="
+                + self.environment["ocm_token"]
+            )
+            ocm_code, ocm_out, ocm_err = self.utils.subprocess_exec(ocm_login_command)
+            sys.exit("Exiting...") if ocm_code != 0 else self.logging.info(
+                "`ocm login` execution OK"
+            )
 
     def download_kubeconfig(self, cluster_name, path):
         self.logging.debug(
@@ -210,8 +211,8 @@ class PlatformArguments:
             parser.set_defaults(**defaults)
 
         temp_args, temp_unknown_args = parser.parse_known_args()
-        if not temp_args.ocm_token:
-            parser.error("hcp-burner.py: error: the following arguments (or equivalent definition) are required: --ocm-token")
+#        if not temp_args.ocm_token:
+#            parser.error("hcp-burner.py: error: the following arguments (or equivalent definition) are required: --ocm-token")
 
     # def __getitem__(self, item):
     #     return self.parameters[item] if item in self.parameters else None

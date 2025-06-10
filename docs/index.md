@@ -49,7 +49,7 @@ Almost all the parameters can be defined in three ways:
 
 **Only parameters --platform and --subplatform must be defined as wrapper arguments, platform is always required but subplatform is optional**
 
-To add any other parameter to the config file, remove `--` from the argument and change `_` to `_`, for example:
+To add any other parameter to the config file, remove the `--` prefix from the argument and convert hyphens (-) to underscrores (_), for example:
 
 **--cluster-name-seed** will be:
 ```

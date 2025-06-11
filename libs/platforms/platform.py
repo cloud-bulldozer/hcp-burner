@@ -143,11 +143,16 @@ class Platform:
 
     def get_cluster_id(self, cluster_name):
         self.logging.debug(f"Obtaining Cluster ID for cluster name {cluster_name}")
-        describe_code, describe_out, describe_err = self.utils.subprocess_exec(
-            "ocm describe cluster --json " + cluster_name,
+        list_cmd = [
+            'ocm', 'list', 'clusters',
+            f'-p=search=name=\'{cluster_name}\'',
+            '--columns', 'id', '--no-headers'
+        ]
+        list_code, list_out, list_err = self.utils.subprocess_exec(
+            list_cmd,
             extra_params={"universal_newlines": True},
         )
-        return json.loads(describe_out).get("id", None) if describe_code == 0 else None
+        return list_out.strip() if list_code == 0 else None
 
     def get_ocm_cluster_info(self, cluster_name):
         self.logging.info(f"Get Cluster metadata of {cluster_name}")

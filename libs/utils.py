@@ -73,7 +73,10 @@ class Utils:
         stderr = None
         try:
             log_file = open(output_file, "w") if output_file else subprocess.PIPE
-            process = subprocess.Popen(command.split(), stdout=log_file, stderr=log_file, **extra_params)
+            if isinstance(command, list):
+                process = subprocess.Popen(command, stdout=log_file, stderr=log_file, **extra_params)
+            else:
+                process = subprocess.Popen(command.split(), stdout=log_file, stderr=log_file, **extra_params)
             stdout, stderr = process.communicate()
             if process.returncode != 0 and log_output:
                 self.logging.error(f"Failed to execute command: {command}")

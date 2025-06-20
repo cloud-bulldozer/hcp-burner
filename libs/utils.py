@@ -235,6 +235,23 @@ class Utils:
         log_file = load if load != "" else platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
         if not self.force_terminate:
+            self.logging.info(f"Checking cluster health for {cluster_name} using oc adm wait-for-stable-cluster...")
+
+            health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+            health_code, health_out, health_err = self.subprocess_exec(
+                health_cmd,
+                extra_params={"env": load_env, "universal_newlines": True}
+            )
+
+            if health_code != 0:
+                self.logging.error(f"Cluster {cluster_name} is unhealthy or not stable. Skipping workload execution.")
+                self.logging.error(health_err)
+                return 1
+            else:
+                self.logging.info(f"Cluster {cluster_name} is healthy. Proceeding with workload.")
+                if health_out:
+                    for line in health_out.strip().splitlines():
+                        self.logging.info(f"[{cluster_name}] {line}")
             load_code, load_out, load_err = self.subprocess_exec('./' + platform.environment['load']['script'], my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': load_env})
             if load_code != 0:
                 self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/' + platform.environment['load']['script']} on {cluster_name}")

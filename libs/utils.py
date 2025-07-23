@@ -212,6 +212,8 @@ class Utils:
 
     def cluster_load(self, platform, cluster_name, load=""):
         load_env = os.environ.copy()
+        load_env["START_TIME"] = f"{platform.environment['clusters'][cluster_name]['cluster_start_time_on_mc']}"
+        load_env["END_TIME"] = f"{platform.environment['clusters'][cluster_name]['cluster_end_time']}"
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
         load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")

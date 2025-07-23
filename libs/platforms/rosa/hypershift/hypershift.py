@@ -528,6 +528,8 @@ class Hypershift(Rosa):
             cluster_end_time = int(datetime.datetime.utcnow().timestamp())
             # Getting againg metadata to update the cluster status
             cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
+            cluster_info['cluster_start_time_on_mc'] = cluster_start_time_on_mc  # excludes pre-flight durations
+            cluster_info['cluster_end_time'] = cluster_end_time
             cluster_info["install_duration"] = cluster_end_time - cluster_start_time
             access_timers = self.get_cluster_admin_access(cluster_name, cluster_info["path"])
             cluster_info["kubeconfig"] = access_timers.get("kubeconfig", None)
@@ -578,8 +580,6 @@ class Hypershift(Rosa):
             if self.es is not None:
                 self.es.index_metadata(cluster_info)
                 self.logging.info("Indexing Management cluster stats")
-                os.environ["START_TIME"] = f"{cluster_start_time_on_mc}"  # excludes pre-flight durations
-                os.environ["END_TIME"] = f"{cluster_end_time}"
                 self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
                 time.sleep(120)
                 self.utils.cluster_load(platform, cluster_name, load="index")

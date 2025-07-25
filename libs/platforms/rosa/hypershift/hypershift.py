@@ -10,6 +10,7 @@ import math
 import shutil
 import concurrent.futures
 import configparser
+from copy import deepcopy
 
 from libs.platforms.rosa.rosa import Rosa
 from libs.platforms.rosa.rosa import RosaArguments
@@ -578,7 +579,10 @@ class Hypershift(Rosa):
                 self.logging.error(err)
                 self.logging.error(f"Failed to write metadata_install.json file located at {cluster_info['path']}")
             if self.es is not None:
-                self.es.index_metadata(cluster_info)
+                cluster_info_copy = deepcopy(cluster_info)
+                del cluster_info_copy['cluster_start_time_on_mc']
+                del cluster_info_copy['cluster_end_time']
+                self.es.index_metadata(cluster_info_copy)
                 self.logging.info("Indexing Management cluster stats")
                 self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
                 time.sleep(120)

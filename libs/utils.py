@@ -214,8 +214,10 @@ class Utils:
         load_env = os.environ.copy()
         if 'cluster_start_time_on_mc' in platform.environment['clusters'][cluster_name]:
             load_env["START_TIME"] = f"{platform.environment['clusters'][cluster_name]['cluster_start_time_on_mc']}"
+            del platform.environment['clusters'][cluster_name]['cluster_start_time_on_mc']
         if 'cluster_end_time' in platform.environment['clusters'][cluster_name]:
             load_env["END_TIME"] = f"{platform.environment['clusters'][cluster_name]['cluster_end_time']}"
+            del platform.environment['clusters'][cluster_name]['cluster_end_time']
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
         load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")

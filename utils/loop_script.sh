@@ -31,7 +31,16 @@ _delete_clusters() {
   exit 0
 }
 
+_cleanup_aws_tags() {
+  log "INFO: Cleaning up AWS Tags on the subnets"
+  export IFS=","
+  for _ID in $AWS_SUBNETS; do
+    aws ec2 delete-tags --resources $_ID
+  done
+}
+
 _create_cluster() {
+  _cleanup_aws_tags
   log "INFO: Creating cluster $1" | tee /dev/fd/3
   # Timeout of 15 minutes for creating the cluster (3 times of normal execution)
   timeout --foreground -k 900 900 rosa create cluster -c "$1" --replicas 3 --hosted-cp --sts --mode auto -y --watch --multi-az --subnet-ids "$2" --properties "$3" --oidc-config-id "${OIDC_CONFIG_ID}" --operator-roles-prefix "${OPERATOR_ROLES_PREFIX}" --compute-machine-type m5.xlarge --version 4.14.2 || (log "ERROR: Failed to create cluster $1 after 15 minutes" && return 1)

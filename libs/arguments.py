@@ -61,7 +61,7 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--cleanup-clusters", action="store_true", help="Delete all created clusters at the end")
         self.common_parser.add_argument("--wait-before-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_WAIT_BEFORE_CLEANUP", help="Minutes to wait before starting the cleanup process", default=0, type=int)
-        self.common_parser.add_argument("--delay-between-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_CLEANUP", help="Minutes to wait between cluster deletion", default=0, type=int)
+        self.common_parser.add_argument("--delay-between-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_CLEANUP", help="Seconds to wait between cluster deletion", default=0, type=int)
 
         self.common_args, self.unknown_args = self.common_parser.parse_known_args()
 

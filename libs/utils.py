@@ -98,7 +98,7 @@ class Utils:
         if platform.environment["wait_before_cleanup"] != 0:
             self.logging.info(f"Waiting {platform.environment['wait_before_cleanup']} minutes before starting the cluster deletion")
             time.sleep(platform.environment["wait_before_cleanup"] * 60)
-        self.logging.info(f"Attempting to start cleanup process of {len(platform.environment['clusters'])} clusters waiting {platform.environment['delay_between_cleanup']} minutes between each deletion")
+        self.logging.info(f"Attempting to start cleanup process of {len(platform.environment['clusters'])} clusters waiting {platform.environment['delay_between_cleanup']} seconds between each deletion")
         delete_cluster_thread_list = []
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {cluster_info['status']}")
@@ -117,9 +117,9 @@ class Utils:
             )
             if platform.environment["delay_between_cleanup"] != 0:
                 self.logging.info(
-                    f"Waiting {platform.environment['delay_between_cleanup']} minutes before deleting the next cluster"
+                    f"Waiting {platform.environment['delay_between_cleanup']} seconds before deleting the next cluster"
                 )
-                time.sleep(platform.environment["delay_between_cleanup"] * 60)
+                time.sleep(platform.environment["delay_between_cleanup"])
         return delete_cluster_thread_list
 
     # To form the cluster_info dict for cleanup funtions

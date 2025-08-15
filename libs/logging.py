@@ -16,7 +16,7 @@ class Logging(logging.getLoggerClass()):
         self.filters = []
         self.handlers = []
         self.setLevel(loglevel.upper())
-        self.log_format = "%(asctime)s %(levelname)s %(module)s - %(funcName)s: %(message)s"
+        self.log_format = "%(asctime)s %(levelname)s %(threadName)s %(module)s - %(funcName)s: %(message)s"
         consolelog = logging.StreamHandler()
         consolelog.setFormatter(CustomFormatter(self.log_format))
         self.addHandler(consolelog)

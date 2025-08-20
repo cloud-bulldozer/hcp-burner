@@ -12,8 +12,30 @@ download_ocm(){
 }
 
 download_rosa(){
-  curl -L -o "${DESTINATION_FOLDER}/rosa" "$(curl -s https://api.github.com/repos/openshift/rosa/releases/latest | jq -r '.assets | map(select(.name | contains("rosa-linux-amd64"))) | .[0].browser_download_url')"
+  echo "Finding the latest ROSA CLI release..."
+  # 1. Find the download URL for the latest Linux tar.gz file
+  DOWNLOAD_URL=$(curl -s https://api.github.com/repos/openshift/rosa/releases/latest | jq -r '.assets | map(select(.name | endswith("Linux_x86_64.tar.gz"))) | .[0].browser_download_url')
+
+  echo "Downloading from ${DOWNLOAD_URL}"
+  # 2. Download the archive to the current directory
+  curl -L -o rosa-latest.tar.gz "${DOWNLOAD_URL}"
+
+  echo "Extracting the 'rosa' binary..."
+  # 3. Extract just the 'rosa' binary from the archive
+  tar -xzf rosa-latest.tar.gz rosa
+
+  echo "Installing to ${DESTINATION_FOLDER}..."
+  # 4. Move the binary to its final destination
+  mv rosa "${DESTINATION_FOLDER}/rosa"
+
+  # 5. Make the binary executable
   chmod a+x "${DESTINATION_FOLDER}/rosa"
+
+  echo "Cleaning up..."
+  # 6. Remove the downloaded archive
+  rm rosa-latest.tar.gz
+
+  echo "ROSA CLI installed successfully!"
 }
 
 download_terraform(){

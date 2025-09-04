@@ -605,12 +605,12 @@ class Hypershift(Rosa):
     def _namespace_wait(self, kubeconfig, cluster_id, cluster_name, type):
         start_time = int(datetime.datetime.utcnow().timestamp())
         self.logging.info(
-            f"Capturing namespace creation time on {type} Cluster for {cluster_name}. Waiting 30 minutes until datetime.datetime.fromtimestamp(start_time + 30 * 60)"
+            f"Capturing namespace creation time on {type} Cluster for {cluster_name}. Waiting 60 minutes until datetime.datetime.fromtimestamp(start_time + 60 * 60)"
         )
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = kubeconfig
-        # Waiting 30 minutes for preflight checks to end
-        while datetime.datetime.utcnow().timestamp() < start_time + 30 * 60:
+        # Waiting 60 minutes for preflight checks to end
+        while datetime.datetime.utcnow().timestamp() < start_time + 60 * 60:
             if self.utils.force_terminate:
                 self.logging.error(f"Exiting namespace creation waiting for {cluster_name} on the {type} cluster after capturing Ctrl-C")
                 return 0
@@ -623,7 +623,7 @@ class Hypershift(Rosa):
             )
             if oc_project_code != 0:
                 self.logging.warning(
-                    f"Failed to get the project list on the {type} Cluster. Retrying in 5 seconds. Waiting until {datetime.datetime.fromtimestamp(start_time + 30 * 60)}"
+                    f"Failed to get the project list on the {type} Cluster. Retrying in 5 seconds. Waiting until {datetime.datetime.fromtimestamp(start_time + 60 * 60)}"
                 )
                 time.sleep(5)
             else:
@@ -634,7 +634,7 @@ class Hypershift(Rosa):
                     self.logging.warning(oc_project_err)
                     self.logging.warning(err)
                     self.logging.warning(
-                        f"Failed to get the project list on the {type} Cluster. Retrying in 5 seconds until {datetime.datetime.fromtimestamp(start_time + 30 * 60)}"
+                        f"Failed to get the project list on the {type} Cluster. Retrying in 5 seconds until {datetime.datetime.fromtimestamp(start_time + 60 * 60)}"
                     )
                     time.sleep(5)
                     continue
@@ -653,13 +653,10 @@ class Hypershift(Rosa):
                     return end_time
                 else:
                     self.logging.warning(
-                        f"Namespace for {cluster_name} not found in {type} Cluster. Retrying in 5 seconds until {datetime.datetime.fromtimestamp(start_time + 30 * 60)}"
+                        f"Namespace for {cluster_name} not found in {type} Cluster. Retrying in 5 seconds until {datetime.datetime.fromtimestamp(start_time + 60 * 60)}"
                     )
                     time.sleep(5)
-        self.logging.error(
-            f"Failed to get namespace for {cluster_name} on the {type} cluster after 15 minutes"
-            % (cluster_name, type)
-        )
+        self.logging.error(f"Failed to get namespace for {cluster_name} on the {type} cluster after 60 minutes")
         return 0
 
     def get_workers_ready(self, kubeconfig, cluster_name):

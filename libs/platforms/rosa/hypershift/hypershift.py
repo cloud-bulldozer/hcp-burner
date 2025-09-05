@@ -584,8 +584,6 @@ class Hypershift(Rosa):
                 del cluster_info_copy['cluster_end_time']
                 self.es.index_metadata(cluster_info_copy)
                 self.logging.info("Indexing Management cluster stats")
-                self.logging.info("Waiting 2 minutes for HC prometheus to be available for scrapping")
-                time.sleep(120)
                 self.utils.cluster_load(platform, cluster_name, load="index")
             # if cluster_load:
                 #     with all_clusters_installed:

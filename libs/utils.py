@@ -232,7 +232,9 @@ class Utils:
         # Copy executor to the local folder because we shaw in the past that we cannot use kube-burner with multiple executions at the same time
         shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        if load != "index":
+        if load == "index":
+            load_env["EXTRA_FLAGS"] = "--check-health=False"
+        else:
             load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
@@ -241,9 +243,16 @@ class Utils:
         log_file = load if load != "" else platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
         if not self.force_terminate:
-            self.logging.info(f"Checking cluster health for {cluster_name} using oc adm wait-for-stable-cluster...")
+            if load == "index":
+                self.logging.info(f"Checking cluster {cluster_name} for available monitoring operator using oc wait...")
 
-            health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+                health_cmd = "oc wait --for=condition=Available=True co/monitoring --timeout=60m"
+
+            else:
+                self.logging.info(f"Checking cluster {cluster_name} health using oc adm wait-for-stable-cluster...")
+
+                health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+
             health_code, health_out, health_err = self.subprocess_exec(
                 health_cmd,
                 extra_params={"env": load_env, "universal_newlines": True}

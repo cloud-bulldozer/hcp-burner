@@ -1,0 +1,4 @@
+openshift
+elasticsearch==7.13.4
+gitpython
+packaging

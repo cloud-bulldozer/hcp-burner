@@ -229,8 +229,8 @@ class Utils:
                 self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
                 self.logging.error(err)
                 return 1
-        # Copy executor to the local folder because we shaw in the past that we cannot use kube-burner with multiple executions at the same time
-        shutil.copy2(platform.environment['load']['executor'], my_path)
+        # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
+        # shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
         if load == "index":
             load_env["EXTRA_FLAGS"] = "--check-health=False"

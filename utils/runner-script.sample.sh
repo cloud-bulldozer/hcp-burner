@@ -3,15 +3,15 @@
 # Copy and fill in empty environment variables
 
 ts="$(date -u +%Y%m%d)"
+external_log_file_ts="$(date -u +%Y%m%d-%H%M%S)"
 
 # Adjust for each new run
 iteration=${ts}-run1
 
-# Logging and working directory
+# Logging level and working directory
 export HCP_BURNER_PATH=/root/rosa/hcpb-${iteration}
 export HCP_BURNER_LOG_LEVEL=INFO
-# export HCP_BURNER_LOG_LEVEL=DEBUG
-export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}.log
+#export HCP_BURNER_LOG_LEVEL=DEBUG
 
 # Cluster name prefix
 export HCP_BURNER_STATIC_CLUSTER_NAME=p4-hcpb0
@@ -60,14 +60,22 @@ export QPS=20
 export BURST=20
 export ES_INDEX=ripsaw-kube-burner
 export ES_SERVER=
+# Set ES_Server to "" to prevent workload from indexing if concurrency of workloads expected to exceed available memory or to speed up workload phase
+#export ES_SERVER=""
 export TF_CLI_ARGS_apply="-parallelism=50"
 
 # create, workload, delete the clusters
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --enable-workload --cleanup-clusters --delete-vpcs
+#export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --enable-workload --cleanup-clusters --delete-vpcs 2>&1 | tee ${external_log_file_ts}-complete.log
 # create, no workload, delete
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --cleanup-clusters --delete-vpcs
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --cleanup-clusters --delete-vpcs 2>&1 | tee ${external_log_file_ts}-install-delete.log
 
 # Each a separate step
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --enable-workload
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --cleanup-clusters --delete-vpcs
+#export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}-install.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs 2>&1 | tee ${external_log_file_ts}-install.log
+
+#export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}-workload.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --enable-workload 2>&1 | tee ${external_log_file_ts}-workload.log
+
+#export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}-cleanup.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --cleanup-clusters --delete-vpcs 2>&1 | tee ${external_log_file_ts}-cleanup.log

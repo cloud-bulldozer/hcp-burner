@@ -235,9 +235,9 @@ class Rosa(Platform):
         return_data = {}
         start_time = int(datetime.datetime.utcnow().timestamp())
         previous_status = ""
-        self.logging.info(f"Collecting preflight times for cluster {cluster_name} during 60 minutes until {datetime.datetime.fromtimestamp(start_time + 60 * 60)}")
+        self.logging.info(f"Collecting preflight times for cluster {cluster_name} during 120 minutes until {datetime.datetime.fromtimestamp(start_time + 120 * 60)}")
         # Waiting 1 hour for preflight checks to end
-        while datetime.datetime.utcnow().timestamp() < start_time + 60 * 60:
+        while datetime.datetime.utcnow().timestamp() < start_time + 120 * 60:
             if self.utils.force_terminate:
                 self.logging.error(f"Exiting preflight times capturing on {cluster_name} cluster after capturing Ctrl-C")
                 return 0
@@ -258,10 +258,10 @@ class Rosa(Platform):
                     self.logging.info(f"Cluster {cluster_name} is on installing status. Exiting preflights waiting...")
                     return return_data
             else:
-                self.logging.debug(f"Cluster {cluster_name} on {current_status} status. Waiting 2 seconds until {datetime.datetime.fromtimestamp(start_time + 60 * 60)} for next check")
+                self.logging.debug(f"Cluster {cluster_name} on {current_status} status. Waiting 2 seconds until {datetime.datetime.fromtimestamp(start_time + 120 * 60)} for next check")
                 time.sleep(1)
             previous_status = current_status
-        self.logging.error(f"Cluster {cluster_name} on {current_status} status (not installing) after 60 minutes. Exiting preflight waiting...")
+        self.logging.error(f"Cluster {cluster_name} on {current_status} status (not installing) after 120 minutes. Exiting preflight waiting...")
         return return_data
 
     def get_cluster_admin_access(self, cluster_name, path):

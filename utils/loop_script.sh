@@ -35,7 +35,7 @@ _cleanup_aws_tags() {
   log "INFO: Cleaning up AWS Tags on the subnets"
   export IFS=","
   for _ID in $AWS_SUBNETS; do
-    aws ec2 delete-tags --resources $_ID
+    aws ec2 delete-tags --resources "$_ID"
   done
 }
 

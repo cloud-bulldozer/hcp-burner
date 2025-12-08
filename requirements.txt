@@ -2,3 +2,7 @@ openshift
 elasticsearch==7.13.4
 gitpython
 packaging
+azure-identity
+azure-mgmt-resource>=17.0.0
+azure-core
+requests

@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-import shutil
 import errno
 import string
 import signal
@@ -10,6 +9,7 @@ import random
 import time
 import subprocess
 import threading
+from datetime import datetime, timedelta
 from git import Repo
 
 
@@ -128,7 +128,7 @@ class Utils:
         loop_counter = 0
         while loop_counter < platform.environment["cluster_count"]:
             loop_counter += 1
-            cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
+            cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter)
             platform.environment["clusters"][cluster_name] = {}
             platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(platform, cluster_name)
             platform.environment["clusters"][cluster_name]["status"] = platform.environment["clusters"][cluster_name]["metadata"]["status"]
@@ -142,7 +142,7 @@ class Utils:
         self.logging.info(f"Attempting to start {platform.environment['load']['executor']} {platform.environment['load']['workload']} load process on {len(platform.environment['clusters'])} clusters")
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.debug(cluster_info)
-            if cluster_info['status'] in ("ready", "Completed"):
+            if cluster_info['status'] in ("ready", "Completed", "Succeeded"):
                 self.logging.info(f"Attempting to start load process on {cluster_name}")
                 try:
                     thread = threading.Thread(target=self.cluster_load, args=(platform, cluster_name))
@@ -190,7 +190,7 @@ class Utils:
                             cluster_workers = int(platform.environment["workers"])
                         else:
                             cluster_workers = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
-                        cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
+                        cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter)
                         platform.environment["clusters"][cluster_name] = {}
                         try:
                             platform.environment["clusters"][cluster_name]["workers"] = cluster_workers
@@ -220,7 +220,54 @@ class Utils:
             del platform.environment['clusters'][cluster_name]['cluster_end_time']
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
-        load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
+
+        # Check AZURE_PROM_TOKEN file age for ARO platform
+        # AZURE_PROM_TOKEN is required to scrape metrics from MC (Management Cluster) and it cannot
+        # be auto-generated - it requires manual intervention. This check ensures the token file
+        # is recent (within 1 hour) to avoid using stale tokens.
+        # User can either: 1) Provide a valid token file, or 2) Provide both AZURE_PROM_TOKEN and MC_KUBECONFIG as env vars
+        if platform.environment.get("platform") == "aro":
+            azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
+            token_from_file = False
+
+            # Option 1: User provided token file
+            if azure_prom_token_path and os.path.exists(azure_prom_token_path):
+                file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(azure_prom_token_path))
+                should_use_token = False
+
+                if file_age > timedelta(hours=1):
+                    self.logging.warning(f"[{cluster_name}] AZURE_PROM_TOKEN file is older than 1 hour (age: {file_age}). File may be stale.")
+                    try:
+                        response = input(f"[{cluster_name}] Stale AZURE_PROM_TOKEN ({azure_prom_token_path}), manually update the file and confirm (yes/no): ").strip().lower()
+                        should_use_token = response in ['yes', 'y']
+                    except (EOFError, KeyboardInterrupt):
+                        should_use_token = False
+                else:
+                    should_use_token = True
+
+                if should_use_token:
+                    try:
+                        with open(azure_prom_token_path, 'r') as token_file:
+                            load_env["AZURE_PROM_TOKEN"] = token_file.read().strip()
+                            token_from_file = True
+                            self.logging.info(f"[{cluster_name}] Successfully loaded AZURE_PROM_TOKEN from file: {azure_prom_token_path}")
+                    except Exception as err:
+                        self.logging.error(f"[{cluster_name}] Failed to read AZURE_PROM_TOKEN from file {azure_prom_token_path}: {err}")
+                        return 1
+
+            # Option 2: User should provide both AZURE_PROM_TOKEN and MC_KUBECONFIG as env vars
+            if not token_from_file:
+                has_token = "AZURE_PROM_TOKEN" in load_env
+                has_mc_kubeconfig = "MC_KUBECONFIG" in load_env
+
+                if not (has_token and has_mc_kubeconfig):
+                    # Incomplete configuration: user didn't provide both, remove MC_KUBECONFIG
+                    if "MC_KUBECONFIG" in load_env:
+                        del load_env["MC_KUBECONFIG"]
+                        self.logging.warning(f"[{cluster_name}] Incomplete configuration: Both AZURE_PROM_TOKEN and MC_KUBECONFIG must be provided. Removed MC_KUBECONFIG.")
+        else:
+            load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
+
         if not os.path.exists(my_path + '/workload'):
             self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
             try:

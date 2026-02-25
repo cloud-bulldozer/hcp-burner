@@ -595,6 +595,41 @@ class Hypershift(Aro):
                 self.logging.error(f"[{cluster_name}] Error waiting for workers: {err}")
                 cluster_info["workers_ready"] = None
 
+        # Handle infra node setup if infra nodepool was created
+        add_aro_hcp_infra = self.environment.get("add_aro_hcp_infra", False)
+        if add_aro_hcp_infra and cluster_info.get("kubeconfig"):
+            self.logging.info(f"[{cluster_name}] Infra nodepool was requested, waiting for infra nodes and configuring components")
+            try:
+                # Wait for infra nodes to be ready (default 2 nodes, 15 min timeout)
+                infra_nodes_ready = self._wait_for_infra_nodes(
+                    kubeconfig=cluster_info["kubeconfig"],
+                    cluster_name=cluster_name,
+                    expected_infra_nodes=2,
+                    wait_time=15
+                )
+                cluster_info["infra_nodes_ready"] = infra_nodes_ready
+
+                if infra_nodes_ready >= 2:
+                    # Move infrastructure components to infra nodes
+                    infra_move_start = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                    move_success = self._move_infra_components(
+                        kubeconfig=cluster_info["kubeconfig"],
+                        cluster_name=cluster_name
+                    )
+                    infra_move_end = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                    cluster_info["infra_components_moved"] = move_success
+                    cluster_info["infra_setup_duration"] = infra_move_end - infra_move_start
+                    if move_success:
+                        self.logging.info(f"[{cluster_name}] Infrastructure components configured to use infra nodes")
+                    else:
+                        self.logging.warning(f"[{cluster_name}] Some infrastructure components may not be configured correctly")
+                else:
+                    self.logging.warning(f"[{cluster_name}] Not enough infra nodes ready, skipping component migration")
+                    cluster_info["infra_components_moved"] = False
+            except Exception as err:
+                self.logging.error(f"[{cluster_name}] Error setting up infra components: {err}")
+                cluster_info["infra_components_moved"] = False
+
         self.logging.info(f"[{cluster_name}] ARO HCP cluster installation completed successfully")
         self.logging.info(f"[{cluster_name}] Total installation duration: {cluster_info['install_duration']} seconds")
         if cluster_info.get("cluster_ready_time"):
@@ -1393,6 +1428,138 @@ class Hypershift(Aro):
                     os.remove(compiled_template_path)
                 except OSError:
                     pass
+
+    def _wait_for_infra_nodes(self, kubeconfig, cluster_name, expected_infra_nodes=2, wait_time=15):
+        """
+        Wait for infra nodes to be ready.
+
+        Args:
+            kubeconfig: Path to kubeconfig file
+            cluster_name: Name of the cluster
+            expected_infra_nodes: Number of infra nodes expected (default: 2)
+            wait_time: Maximum wait time in minutes (default: 15)
+
+        Returns:
+            int: Number of ready infra nodes, or 0 if failed
+        """
+        self.logging.info(
+            f"[{cluster_name}] Waiting {wait_time} minutes for {expected_infra_nodes} infra nodes to be ready"
+        )
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+        starting_time = datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < starting_time + wait_time * 60:
+            nodes_code, nodes_out, nodes_err = self.utils.subprocess_exec(
+                "oc get nodes -o json",
+                extra_params={"env": myenv, "universal_newlines": True},
+                log_output=False
+            )
+            if nodes_code != 0:
+                self.logging.warning(f"[{cluster_name}] Failed to get nodes, retrying in 15 seconds...")
+                time.sleep(15)
+                continue
+
+            try:
+                nodes_json = json.loads(nodes_out)
+            except Exception as err:
+                self.logging.error(f"[{cluster_name}] Cannot parse nodes JSON: {err}")
+                time.sleep(15)
+                continue
+
+            nodes = nodes_json.get("items", [])
+
+            # Count ready infra nodes (nodes with node-role.kubernetes.io/infra label and Ready condition)
+            ready_infra_nodes = 0
+            for node in nodes:
+                labels = node.get("metadata", {}).get("labels", {})
+                if "node-role.kubernetes.io/infra" in labels:
+                    conditions = node.get("status", {}).get("conditions", [])
+                    for condition in conditions:
+                        if condition.get("type") == "Ready" and condition.get("status") == "True":
+                            ready_infra_nodes += 1
+                            break
+
+            if ready_infra_nodes >= expected_infra_nodes:
+                self.logging.info(
+                    f"[{cluster_name}] Found {ready_infra_nodes}/{expected_infra_nodes} ready infra nodes. Infra nodes are ready."
+                )
+                return ready_infra_nodes
+            else:
+                self.logging.info(
+                    f"[{cluster_name}] Found {ready_infra_nodes}/{expected_infra_nodes} ready infra nodes. Waiting 15 seconds..."
+                )
+                time.sleep(15)
+
+        self.logging.error(
+            f"[{cluster_name}] Timeout waiting for infra nodes. Only {ready_infra_nodes}/{expected_infra_nodes} ready."
+        )
+        return ready_infra_nodes
+
+    def _move_infra_components(self, kubeconfig, cluster_name):
+        """
+        Move infrastructure components (monitoring and ingress) to infra nodes.
+
+        This function:
+        1. Patches the IngressController to schedule router pods on infra nodes
+        2. Creates/updates the cluster-monitoring-config ConfigMap to schedule
+           Prometheus and Alertmanager on infra nodes
+
+        Args:
+            kubeconfig: Path to kubeconfig file
+            cluster_name: Name of the cluster
+
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        self.logging.info(f"[{cluster_name}] Moving infrastructure components to infra nodes")
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+
+        success = True
+
+        # 1. Patch IngressController to use infra nodes (using patch file to avoid shell quoting issues)
+        self.logging.info(f"[{cluster_name}] Patching IngressController to use infra nodes")
+        ingress_patch_path = self._get_bicep_template_path("ingress-infra-patch.yaml")
+
+        if not os.path.exists(ingress_patch_path):
+            self.logging.error(f"[{cluster_name}] Ingress patch file not found: {ingress_patch_path}")
+            success = False
+        else:
+            patch_code, patch_out, patch_err = self.utils.subprocess_exec(
+                f"oc patch ingresscontroller/default -n openshift-ingress-operator --type=merge --patch-file={ingress_patch_path}",
+                extra_params={"env": myenv, "universal_newlines": True}
+            )
+            if patch_code != 0:
+                self.logging.error(f"[{cluster_name}] Failed to patch IngressController: {patch_err}")
+                success = False
+            else:
+                self.logging.info(f"[{cluster_name}] IngressController patched successfully")
+
+        # 2. Create/update cluster-monitoring-config ConfigMap from YAML file
+        self.logging.info(f"[{cluster_name}] Configuring monitoring stack to use infra nodes")
+        monitoring_config_path = self._get_bicep_template_path("cluster-monitoring-config.yaml")
+
+        if not os.path.exists(monitoring_config_path):
+            self.logging.error(f"[{cluster_name}] Monitoring config file not found: {monitoring_config_path}")
+            success = False
+        else:
+            apply_code, apply_out, apply_err = self.utils.subprocess_exec(
+                f"oc apply -f {monitoring_config_path}",
+                extra_params={"env": myenv, "universal_newlines": True}
+            )
+            if apply_code != 0:
+                self.logging.error(f"[{cluster_name}] Failed to apply monitoring config: {apply_err}")
+                success = False
+            else:
+                self.logging.info(f"[{cluster_name}] Monitoring config applied successfully")
+
+        if success:
+            self.logging.info(f"[{cluster_name}] Infrastructure components successfully configured to use infra nodes")
+        else:
+            self.logging.warning(f"[{cluster_name}] Some infrastructure components may not have been configured correctly")
+
+        return success
 
     def platform_cleanup(self):
         super().platform_cleanup()

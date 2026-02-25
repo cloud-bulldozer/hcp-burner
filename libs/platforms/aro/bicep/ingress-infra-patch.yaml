@@ -1,0 +1,9 @@
+spec:
+  nodePlacement:
+    nodeSelector:
+      matchLabels:
+        node-role.kubernetes.io/infra: ""
+    tolerations:
+    - key: node-role.kubernetes.io/infra
+      effect: NoSchedule
+

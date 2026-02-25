@@ -538,7 +538,27 @@ class Hypershift(Aro):
                 self.logging.error(f"[{cluster_name}] Error setting up infra components: {err}")
                 cluster_info["infra_components_moved"] = False
 
-        return 0
+        self.logging.info(f"[{cluster_name}] ARO HCP cluster installation completed successfully")
+        self.logging.info(f"[{cluster_name}] Total installation duration: {cluster_info['install_duration']} seconds")
+        if cluster_info.get("cluster_ready_time"):
+            self.logging.info(f"[{cluster_name}] Cluster ready time: {cluster_info['cluster_ready_time']} seconds")
+        if cluster_info.get("workers_ready"):
+            self.logging.info(f"[{cluster_name}] Workers ready time: {cluster_info['workers_ready']} seconds")
+
+        # Ensure directory exists and store metadata
+        try:
+            os.makedirs(cluster_info['path'], exist_ok=True)
+            metadata_install_file = os.path.join(cluster_info['path'], "metadata_install.json")
+            with open(metadata_install_file, "w") as metadata_file:
+                json.dump(cluster_info, metadata_file, indent=2)
+            self.logging.info(f"[{cluster_name}] Metadata install file written to {metadata_install_file}")
+        except Exception as err:
+            self.logging.error(f"[{cluster_name}] Failed to write metadata_install.json: {err}")
+            self.logging.error(f"[{cluster_name}] Attempted path: {cluster_info.get('path', 'N/A')}")
+
+        # Index to ES if available
+        if self.es is not None:
+            self.logging.info(f"[{cluster_name}] ES is available, indexing cluster metadata")
 
     def delete_cluster(self, platform, cluster_name):
         super().delete_cluster(platform, cluster_name)

@@ -372,13 +372,20 @@ class Hypershift(Aro):
                 cluster_template_json = json.load(f)
 
             # Prepare parameters for cluster deployment
+            aro_version = self.environment.get("aro_version", "4.20.8")
+            aro_version_channel = self.environment.get("aro_version_channel", "stable")
+            # For cluster, use only major.minor (e.g., 4.20 from 4.20.8)
+            version_parts = aro_version.split('.')
+            cluster_version = f"{version_parts[0]}.{version_parts[1]}" if len(version_parts) >= 2 else aro_version
             cluster_parameters = {
                 "vnetName": {"value": customer_vnet_name},
                 "subnetName": {"value": customer_vnet_subnet1},
                 "nsgName": {"value": customer_nsg},
                 "clusterName": {"value": cluster_name},
                 "managedResourceGroupName": {"value": managed_resource_group},
-                "keyVaultName": {"value": key_vault_name}
+                "keyVaultName": {"value": key_vault_name},
+                "clusterVersion": {"value": cluster_version},
+                "versionChannelGroup": {"value": aro_version_channel}
             }
 
             cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
@@ -875,6 +882,10 @@ class Hypershift(Aro):
                 self.logging.warning(f"[{cluster_name}] Unexpected error retrieving deployment metadata: {err}")
         else:
             self.logging.error(f"[{cluster_name}] Failed to retrieve cluster metadata after all retry attempts")
+            # Set minimal metadata with failed status so the caller can skip this cluster
+            metadata["cluster_name"] = cluster_name
+            metadata["status"] = "metadata_not_found"
+            metadata["resource_group"] = customer_rg_name
 
         return metadata
 
@@ -1247,11 +1258,20 @@ class Hypershift(Aro):
 
     def _build_nodepool_parameters(self, cluster_name, np_name, autoscale, replica=None, min_replica=None, max_replica=None, node_size="Standard_D8s_v3"):
         """Helper function to build nodepool parameters based on autoscale mode"""
+        # Get version info from environment
+        # User should provide full version (e.g., 4.20.8) - used as-is for nodepools
+        aro_version = self.environment.get("aro_version", "4.20.8")
+        aro_version_channel = self.environment.get("aro_version_channel", "stable")
+        # For nodepools, use the full version (e.g., 4.20.8)
+        nodepool_version = aro_version
+
         base_params = {
             "clusterName": {"value": cluster_name},
             "nodePoolName": {"value": np_name},
             "autoscale": {"value": autoscale},
-            "nodeSize": {"value": node_size}
+            "nodeSize": {"value": node_size},
+            "nodepoolVersion": {"value": nodepool_version},
+            "versionChannelGroup": {"value": aro_version_channel}
         }
 
         if autoscale:
@@ -1266,7 +1286,7 @@ class Hypershift(Aro):
 
         return base_params
 
-    def _create_worker_nodepool(self, customer_rg_name, cluster_name, np_name, deployment_name, autoscale, replica, min_replica, max_replica, node_size, subscription_id, output_path=None):
+    def _create_worker_nodepool(self, customer_rg_name, cluster_name, np_name, deployment_name, autoscale, replica, min_replica, max_replica, node_size, subscription_id, output_path=None, wait=False):
         """Helper function to create a single worker nodepool"""
         template_name = "nodepool.bicep"  # Combined template handles both static and autoscale
         parameters = self._build_nodepool_parameters(
@@ -1274,7 +1294,7 @@ class Hypershift(Aro):
         )
         replica_info = f"{min_replica}-{max_replica}" if autoscale else str(replica)
         self.logging.info(f"[{cluster_name}] Creating {np_name} with {replica_info} replicas")
-        self._create_nodepool_deployment(cluster_name, customer_rg_name, deployment_name, template_name, parameters, subscription_id, wait=False, output_path=output_path)
+        self._create_nodepool_deployment(cluster_name, customer_rg_name, deployment_name, template_name, parameters, subscription_id, wait=wait, output_path=output_path)
 
     def create_nodepool(self, cluster_name, replica, max_replica=None, min_replica=None, node_size="Standard_D8s_v3", autoscale=False, customer_rg_name=None, add_aro_hcp_infra=None):
         """
@@ -1313,6 +1333,10 @@ class Hypershift(Aro):
         effective_replica = max_replica if autoscale else replica
         needs_splitting = effective_replica > limit
 
+        # Wait for worker nodepools only if infra nodepool is NOT being created
+        # When infra nodepool is created, we only wait for infra (worker nodepools are async)
+        wait_for_workers = not add_aro_hcp_infra
+
         if needs_splitting:
             # Split into multiple nodepools
             iterations = effective_replica // limit
@@ -1325,7 +1349,7 @@ class Hypershift(Aro):
                 deployment_name = f"node-pool-{i}"
                 self._create_worker_nodepool(
                     customer_rg_name, cluster_name, np_name, deployment_name,
-                    autoscale, limit, min_replica, limit, node_size, subscription_id, output_path=cluster_path
+                    autoscale, limit, min_replica, limit, node_size, subscription_id, output_path=cluster_path, wait=wait_for_workers
                 )
 
             # Create remaining nodepool if needed
@@ -1334,7 +1358,7 @@ class Hypershift(Aro):
                 deployment_name = f"node-pool-{iterations + 1}"
                 self._create_worker_nodepool(
                     customer_rg_name, cluster_name, np_name, deployment_name,
-                    autoscale, adjusted_replica, min_replica, adjusted_replica, node_size, subscription_id, output_path=cluster_path
+                    autoscale, adjusted_replica, min_replica, adjusted_replica, node_size, subscription_id, output_path=cluster_path, wait=wait_for_workers
                 )
         else:
             # Create single nodepool
@@ -1342,7 +1366,7 @@ class Hypershift(Aro):
             deployment_name = "node-pool-2" if autoscale else "node-pool"
             self._create_worker_nodepool(
                 customer_rg_name, cluster_name, np_name, deployment_name,
-                autoscale, replica, min_replica, max_replica, node_size, subscription_id, output_path=cluster_path
+                autoscale, replica, min_replica, max_replica, node_size, subscription_id, output_path=cluster_path, wait=wait_for_workers
             )
 
         # Create infra nodepool if requested
@@ -1352,12 +1376,18 @@ class Hypershift(Aro):
             deployment_name = "node-pool-infra"
             template_name = "nodepool-infra.bicep"
             infra_size = self.environment.get("infra_size", "Standard_E8s_v3")
+            # Get version info for infra nodepool - use full version (e.g., 4.20.8)
+            aro_version = self.environment.get("aro_version", "4.20.8")
+            aro_version_channel = self.environment.get("aro_version_channel", "stable")
+            nodepool_version = aro_version
             parameters = {
                 "clusterName": {"value": cluster_name},
                 "nodePoolName": {"value": np_name},
-                "nodeSize": {"value": infra_size}
+                "nodeSize": {"value": infra_size},
+                "nodepoolVersion": {"value": nodepool_version},
+                "versionChannelGroup": {"value": aro_version_channel}
             }
-            self.logging.info(f"[{cluster_name}] Creating infra nodepool with VM size: {infra_size}")
+            self.logging.info(f"[{cluster_name}] Creating infra nodepool with VM size: {infra_size}, version: {nodepool_version}")
             self._create_nodepool_deployment(cluster_name, customer_rg_name, deployment_name, template_name, parameters, subscription_id, wait=True, output_path=cluster_path)
 
         self.logging.info(f"[{cluster_name}] Nodepool creation completed")

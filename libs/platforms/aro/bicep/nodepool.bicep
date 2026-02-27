@@ -20,6 +20,12 @@ param maxReplica int = 2
 @description('The VM size of the node pool')
 param nodeSize string = 'Standard_D8s_v3'
 
+@description('The OpenShift version for the nodepool in major.minor.patch format (e.g., 4.20.8)')
+param nodepoolVersion string = '4.20.8'
+
+@description('The version channel group (e.g., stable, candidate)')
+param versionChannelGroup string = 'stable'
+
 resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview' existing = {
   name: clusterName
 }
@@ -30,8 +36,8 @@ resource nodepool 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters/nodePools@2024
   location: resourceGroup().location
   properties: {
     version: {
-      id: '4.19.7'
-      channelGroup: 'stable'
+      id: nodepoolVersion
+      channelGroup: versionChannelGroup
     }
     platform: {
       subnetId: hcp.properties.platform.subnetId

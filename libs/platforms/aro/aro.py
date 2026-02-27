@@ -20,6 +20,8 @@ class Aro(Platform):
         self.environment["azure_credentials_file"] = arguments["azure_credentials_file"]
         self.environment['azure_mc_cluster_subscription'] = arguments['azure_mc_subscription']
         self.environment["aro_env"] = arguments["aro_env"]
+        self.environment["aro_version"] = arguments["aro_version"]
+        self.environment["aro_version_channel"] = arguments["aro_version_channel"]
         self.environment["commands"].append("az")
 
     def initialize(self):
@@ -151,6 +153,8 @@ class AroArguments(PlatformArguments):
         parser.add_argument("--azure-credentials-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_CREDENTIALS_FILE", help="Azure credentials file")
         parser.add_argument("--azure-region", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_REGION", default='eastus', help="Azure Region")
         parser.add_argument("--azure-mc-subscription", action=EnvDefault, env=environment, envvar="HCP_BURNER_MC_SUBSCRIPTION", help="Azure Subscription where MC Cluster is installed")
+        parser.add_argument("--aro-version", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION", default="4.20.8", help="OpenShift version in major.minor.patch format (e.g., 4.20.8). Cluster uses major.minor, nodepools use full version")
+        parser.add_argument("--aro-version-channel", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION_CHANNEL", default="stable", help="Version channel group (default: stable). Options: stable, candidate")
 
         if config_file:
             config = configparser.ConfigParser()

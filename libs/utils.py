@@ -29,6 +29,8 @@ class Utils:
             "clusters_deleted_failed": 0,
         }
         self._counter_lock = threading.Lock()
+        # Pre-validated AZURE_PROM_TOKEN for ARO workloads
+        self.azure_prom_token = None
 
     def set_force_terminate(self, signum, frame):
         self.logging.warning("Captured Ctrl-C, sending exit event to watcher, any cluster install/delete will continue its execution")
@@ -225,9 +227,53 @@ class Utils:
             platform.environment['clusters'][cluster_name]['workers'] = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
         return platform
 
+    def validate_azure_prom_token(self, platform, phase="workload"):
+        """Validate and load AZURE_PROM_TOKEN from file or environment variable."""
+        if platform.environment.get("platform") != "aro":
+            return True
+
+        azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
+
+        # Option 1: Token file provided
+        if azure_prom_token_path and os.path.exists(azure_prom_token_path):
+            file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(azure_prom_token_path))
+            if file_age > timedelta(hours=1):
+                self.logging.warning(f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age})")
+                try:
+                    if input(f"[{phase}] Update token file and confirm (yes/no): ").strip().lower() not in ['yes', 'y']:
+                        self.azure_prom_token = None
+                        return False
+                except (EOFError, KeyboardInterrupt):
+                    self.azure_prom_token = None
+                    return False
+            try:
+                with open(azure_prom_token_path, 'r') as f:
+                    self.azure_prom_token = f.read().strip()
+                self.logging.info(f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path}")
+                return True
+            except Exception as err:
+                self.logging.error(f"[{phase}] Failed to read token file: {err}")
+                self.azure_prom_token = None
+                return False
+
+        # Option 2: Environment variable
+        if "AZURE_PROM_TOKEN" in os.environ:
+            self.azure_prom_token = os.environ["AZURE_PROM_TOKEN"]
+            self.logging.info(f"[{phase}] Using AZURE_PROM_TOKEN from environment")
+            return True
+
+        self.logging.warning(f"[{phase}] No AZURE_PROM_TOKEN available")
+        self.azure_prom_token = None
+        return False
+
     def load_scheduler(self, platform):
         load_thread_list = []
         self.logging.info(f"Attempting to start {platform.environment['load']['executor']} {platform.environment['load']['workload']} load process on {len(platform.environment['clusters'])} clusters")
+
+        # Validate AZURE_PROM_TOKEN for workload phase
+        if platform.environment.get("platform") == "aro":
+            self.validate_azure_prom_token(platform, phase="workload")
+
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.debug(cluster_info)
             if cluster_info['status'] in ("ready", "installed", "Completed", "Succeeded"):
@@ -250,6 +296,11 @@ class Utils:
         self.logging.info(
             f"Attempting to start {platform.environment['cluster_count']} clusters with {platform.environment['batch_size']} batch size"
         )
+
+        # Validate AZURE_PROM_TOKEN before cluster creation for ARO platform
+        if platform.environment.get("platform") == "aro":
+            self.validate_azure_prom_token(platform, phase="install")
+
         cluster_thread_list = []
         batch_count = 0
         loop_counter = 0
@@ -316,51 +367,14 @@ class Utils:
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
 
-        # Check AZURE_PROM_TOKEN file age for ARO platform
-        # AZURE_PROM_TOKEN is required to scrape metrics from MC (Management Cluster) and it cannot
-        # be auto-generated - it requires manual intervention. This check ensures the token file
-        # is recent (within 1 hour) to avoid using stale tokens.
-        # User can either: 1) Provide a valid token file, or 2) Provide both AZURE_PROM_TOKEN and MC_KUBECONFIG as env vars
+        # Use pre-validated AZURE_PROM_TOKEN for ARO platform (validated once in load_scheduler)
         if platform.environment.get("platform") == "aro":
-            azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
-            token_from_file = False
-
-            # Option 1: User provided token file
-            if azure_prom_token_path and os.path.exists(azure_prom_token_path):
-                file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(azure_prom_token_path))
-                should_use_token = False
-
-                if file_age > timedelta(hours=1):
-                    self.logging.warning(f"[{cluster_name}] AZURE_PROM_TOKEN file is older than 1 hour (age: {file_age}). File may be stale.")
-                    try:
-                        response = input(f"[{cluster_name}] Stale AZURE_PROM_TOKEN ({azure_prom_token_path}), manually update the file and confirm (yes/no): ").strip().lower()
-                        should_use_token = response in ['yes', 'y']
-                    except (EOFError, KeyboardInterrupt):
-                        should_use_token = False
-                else:
-                    should_use_token = True
-
-                if should_use_token:
-                    try:
-                        with open(azure_prom_token_path, 'r') as token_file:
-                            load_env["AZURE_PROM_TOKEN"] = token_file.read().strip()
-                            token_from_file = True
-                            self.logging.info(f"[{cluster_name}] Successfully loaded AZURE_PROM_TOKEN from file: {azure_prom_token_path}")
-                    except Exception as err:
-                        self.logging.error(f"[{cluster_name}] Failed to read AZURE_PROM_TOKEN from file {azure_prom_token_path}: {err}")
-                        self.increment_counter("workloads_executed_failed")
-                        return 1
-
-            # Option 2: User should provide both AZURE_PROM_TOKEN and MC_KUBECONFIG as env vars
-            if not token_from_file:
-                has_token = "AZURE_PROM_TOKEN" in load_env
-                has_mc_kubeconfig = "MC_KUBECONFIG" in load_env
-
-                if not (has_token and has_mc_kubeconfig):
-                    # Incomplete configuration: user didn't provide both, remove MC_KUBECONFIG
-                    if "MC_KUBECONFIG" in load_env:
-                        del load_env["MC_KUBECONFIG"]
-                        self.logging.warning(f"[{cluster_name}] Incomplete configuration: Both AZURE_PROM_TOKEN and MC_KUBECONFIG must be provided. Removed MC_KUBECONFIG.")
+            if self.azure_prom_token:
+                load_env["AZURE_PROM_TOKEN"] = self.azure_prom_token
+            else:
+                # No valid token available, remove MC_KUBECONFIG if present
+                if "MC_KUBECONFIG" in load_env:
+                    del load_env["MC_KUBECONFIG"]
         else:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
 

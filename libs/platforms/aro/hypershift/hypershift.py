@@ -317,6 +317,7 @@ class Hypershift(Aro):
                     self.logging.info(f"[{cluster_name}] Metadata install file written to {metadata_install_file}")
                 except Exception as err:
                     self.logging.warning(f"[{cluster_name}] Failed to write metadata_install.json: {err}")
+                self.utils.increment_counter("clusters_created_success")
                 return 0
             except Exception as err:
                 self.logging.warning(f"[{cluster_name}] Error processing existing cluster information: {err}")
@@ -351,6 +352,7 @@ class Hypershift(Aro):
                     cluster_info["status"] = "Failed - Key Vault Query"
                 else:
                     cluster_info["status"] = "Failed - Infrastructure Setup"
+                self.utils.increment_counter("clusters_created_failed")
                 return 1
 
             # Step 4: Create ARO HCP Cluster Deployment
@@ -365,6 +367,7 @@ class Hypershift(Aro):
             if compile_result.returncode != 0:
                 self.logging.error(f"[{cluster_name}] Failed to compile cluster Bicep template: {compile_result.stderr}")
                 cluster_info["status"] = "Failed - Cluster Bicep Compilation"
+                self.utils.increment_counter("clusters_created_failed")
                 return 1
 
             compiled_cluster_template_path = f"{cluster_info['path']}/cluster.json"
@@ -451,6 +454,7 @@ class Hypershift(Aro):
                             elif provisioning_state == "Failed":
                                 cluster_info["status"] = "Failed - Cluster Deployment"
                                 self.logging.error(f"[{cluster_name}] Cluster deployment provisioning state is Failed")
+                                self.utils.increment_counter("clusters_created_failed")
                                 return 1
                             else:
                                 cluster_info["status"] = "Installing"
@@ -470,16 +474,19 @@ class Hypershift(Aro):
                     elapsed_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
                     self.logging.error(f"[{cluster_name}] Did not reach Succeeded or Failed state within 30 minutes (elapsed: {elapsed_time}s, final state: {provisioning_state})")
                     cluster_info["status"] = "Failed - Timeout"
+                    self.utils.increment_counter("clusters_created_failed")
                     return 1
 
             except HttpResponseError as err:
                 self.logging.error(f"[{cluster_name}] Failed to create ARO HCP cluster deployment: {err}")
                 cluster_info["status"] = "Failed - Cluster Deployment"
+                self.utils.increment_counter("clusters_created_failed")
                 return 1
 
         except Exception as err:
             self.logging.error(f"[{cluster_name}] Unexpected error during cluster creation: {err}")
             cluster_info["status"] = "Failed - Unexpected Error"
+            self.utils.increment_counter("clusters_created_failed")
             return 1
 
         # Get metadata
@@ -549,6 +556,7 @@ class Hypershift(Aro):
             cluster_info["kubeconfig"] = None
             cluster_info["workers_wait_time"] = None
             cluster_info["status"] = "Ready. Not Access"
+            self.utils.increment_counter("clusters_created_failed")
             return 1
 
         # Set cluster_end_time before waiting for workers (install_duration should not include worker ready time)
@@ -673,6 +681,7 @@ class Hypershift(Aro):
                 self.logging.error(f"[{cluster_name}] Failed to execute cluster_load (index): {err}")
         else:
             self.logging.warning(f"[{cluster_name}] ES is not available (self.es is None), skipping ES indexing. Check if HCP_BURNER_ES_URL is set.")
+        self.utils.increment_counter("clusters_created_success")
         return 0
 
     def delete_cluster(self, platform, cluster_name):
@@ -765,14 +774,17 @@ class Hypershift(Aro):
                 except Exception as es_err:
                     self.logging.warning(f"[{cluster_name}] Failed to index deletion metadata to ES: {es_err}")
 
+            self.utils.increment_counter("clusters_deleted_success")
             return 0
         except HttpResponseError as err:
             self.logging.error(f"[{cluster_name}] Failed to delete resource group {customer_rg_name}: {err}")
             cluster_info["status"] = "Delete Failed"
+            self.utils.increment_counter("clusters_deleted_failed")
             return 1
         except Exception as err:
             self.logging.error(f"[{cluster_name}] Unexpected error deleting resource group {customer_rg_name}: {err}")
             cluster_info["status"] = "Delete Failed"
+            self.utils.increment_counter("clusters_deleted_failed")
             return 1
 
     def get_metadata(self, platform, cluster_name):

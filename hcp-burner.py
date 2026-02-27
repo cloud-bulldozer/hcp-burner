@@ -133,4 +133,6 @@ if __name__ == "__main__":
     else:
         logging.info("  * Cleanup clusters phase duration: Skipped")
     logging.info(f"* Total duration: {round(end_time - ts_start)} seconds")
-    # utils.test_recap(platform)
+
+    # Print execution summary
+    utils.print_execution_summary(platform)

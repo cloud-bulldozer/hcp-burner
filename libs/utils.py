@@ -17,10 +17,90 @@ class Utils:
     def __init__(self, logging):
         self.logging = logging
         self.force_terminate = False
+        # Counters for tracking execution summary
+        self.counters = {
+            "clusters_requested": 0,
+            "clusters_created_success": 0,
+            "clusters_created_failed": 0,
+            "workloads_executed_success": 0,
+            "workloads_executed_failed": 0,
+            "workloads_skipped": 0,
+            "clusters_deleted_success": 0,
+            "clusters_deleted_failed": 0,
+        }
+        self._counter_lock = threading.Lock()
 
     def set_force_terminate(self, signum, frame):
         self.logging.warning("Captured Ctrl-C, sending exit event to watcher, any cluster install/delete will continue its execution")
         self.force_terminate = True
+
+    def increment_counter(self, counter_name, value=1):
+        """Thread-safe counter increment"""
+        with self._counter_lock:
+            if counter_name in self.counters:
+                self.counters[counter_name] += value
+
+    def print_execution_summary(self, platform):
+        """Print execution summary at the end of the run"""
+        self.logging.info("=" * 60)
+        self.logging.info("EXECUTION SUMMARY")
+        self.logging.info("=" * 60)
+
+        # Installation summary
+        requested = self.counters["clusters_requested"]
+        created_success = self.counters["clusters_created_success"]
+        created_failed = self.counters["clusters_created_failed"]
+
+        self.logging.info("Installation Phase:")
+        self.logging.info(f"  * Clusters Requested:          {requested}")
+        self.logging.info(f"  * Clusters Created Successfully: {created_success}")
+        self.logging.info(f"  * Clusters Failed to Create:     {created_failed}")
+        if requested > 0:
+            success_rate = (created_success / requested) * 100
+            self.logging.info(f"  * Success Rate:                  {success_rate:.1f}%")
+
+        # Workload summary
+        workload_success = self.counters["workloads_executed_success"]
+        workload_failed = self.counters["workloads_executed_failed"]
+        workload_skipped = self.counters["workloads_skipped"]
+        workload_total = workload_success + workload_failed + workload_skipped
+
+        self.logging.info("")
+        self.logging.info("Workload Phase:")
+        self.logging.info(f"  * Workloads Executed Successfully: {workload_success}")
+        self.logging.info(f"  * Workloads Failed:                {workload_failed}")
+        self.logging.info(f"  * Workloads Skipped:               {workload_skipped}")
+        if workload_total > 0:
+            success_rate = (workload_success / workload_total) * 100 if (workload_success + workload_failed) > 0 else 0
+            self.logging.info(f"  * Success Rate:                    {success_rate:.1f}%")
+
+        # Cleanup summary
+        deleted_success = self.counters["clusters_deleted_success"]
+        deleted_failed = self.counters["clusters_deleted_failed"]
+        deleted_total = deleted_success + deleted_failed
+
+        self.logging.info("")
+        self.logging.info("Cleanup Phase:")
+        self.logging.info(f"  * Clusters Deleted Successfully: {deleted_success}")
+        self.logging.info(f"  * Clusters Failed to Delete:     {deleted_failed}")
+        if deleted_total > 0:
+            success_rate = (deleted_success / deleted_total) * 100
+            self.logging.info(f"  * Success Rate:                  {success_rate:.1f}%")
+
+        # List failed clusters if any
+        failed_clusters = []
+        for cluster_name, cluster_info in platform.environment.get("clusters", {}).items():
+            status = cluster_info.get("status", "unknown")
+            if "Failed" in status or status in ("thread_failed", "metadata_not_found", "Delete Failed"):
+                failed_clusters.append((cluster_name, status))
+
+        if failed_clusters:
+            self.logging.info("")
+            self.logging.info("Failed Clusters:")
+            for cluster_name, status in failed_clusters:
+                self.logging.info(f"  * {cluster_name}: {status}")
+
+        self.logging.info("=" * 60)
 
     def disable_signals(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -150,15 +230,20 @@ class Utils:
         self.logging.info(f"Attempting to start {platform.environment['load']['executor']} {platform.environment['load']['workload']} load process on {len(platform.environment['clusters'])} clusters")
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.debug(cluster_info)
-            if cluster_info['status'] in ("ready", "Completed", "Succeeded"):
+            if cluster_info['status'] in ("ready", "installed", "Completed", "Succeeded"):
                 self.logging.info(f"Attempting to start load process on {cluster_name}")
                 try:
                     thread = threading.Thread(target=self.cluster_load, args=(platform, cluster_name))
                 except Exception as err:
                     self.logging.error("Thread creation failed")
                     self.logging.error(err)
+                    self.increment_counter("workloads_executed_failed")
+                    continue
                 load_thread_list.append(thread)
                 thread.start()
+            else:
+                self.logging.warning(f"[{cluster_name}] Skipping workload execution, cluster status: {cluster_info['status']}")
+                self.increment_counter("workloads_skipped")
         return load_thread_list
 
     def install_scheduler(self, platform):
@@ -194,6 +279,7 @@ class Utils:
                         loop_counter += 1
                         create_cluster = True
                     if create_cluster:
+                        self.increment_counter("clusters_requested")
                         if platform.environment["workers"].isdigit():
                             cluster_workers = int(platform.environment["workers"])
                         else:
@@ -210,6 +296,7 @@ class Utils:
                             self.logging.error(f"Failed to create cluster {cluster_name}")
                             self.logging.error(err)
                             platform.environment["clusters"][cluster_name]["status"] = "thread_failed"
+                            self.increment_counter("clusters_created_failed")
                         cluster_thread_list.append(thread)
                         thread.start()
                         self.logging.debug("Number of alive threads %d" % threading.active_count())
@@ -261,6 +348,7 @@ class Utils:
                             self.logging.info(f"[{cluster_name}] Successfully loaded AZURE_PROM_TOKEN from file: {azure_prom_token_path}")
                     except Exception as err:
                         self.logging.error(f"[{cluster_name}] Failed to read AZURE_PROM_TOKEN from file {azure_prom_token_path}: {err}")
+                        self.increment_counter("workloads_executed_failed")
                         return 1
 
             # Option 2: User should provide both AZURE_PROM_TOKEN and MC_KUBECONFIG as env vars
@@ -283,6 +371,7 @@ class Utils:
             except Exception as err:
                 self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
                 self.logging.error(err)
+                self.increment_counter("workloads_executed_failed")
                 return 1
         # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
         # shutil.copy2(platform.environment['load']['executor'], my_path)
@@ -320,6 +409,7 @@ class Utils:
             if health_code != 0:
                 self.logging.error(f"Cluster {cluster_name} is unhealthy or not stable. Skipping workload execution.")
                 self.logging.error(health_err)
+                self.increment_counter("workloads_executed_failed")
                 return 1
             else:
                 self.logging.info(f"Cluster {cluster_name} is healthy. Proceeding with workload.")
@@ -329,5 +419,13 @@ class Utils:
             load_code, load_out, load_err = self.subprocess_exec('./' + platform.environment['load']['script'], my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': clean_env})
             if load_code != 0:
                 self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/' + platform.environment['load']['script']} on {cluster_name}")
+                self.increment_counter("workloads_executed_failed")
+                return 1
+            else:
+                self.logging.info(f"[{cluster_name}] Workload executed successfully")
+                self.increment_counter("workloads_executed_success")
+                return 0
         else:
             self.logging.warning(f"Not starting workload on {cluster_name} after capturing Ctrl-C")
+            self.increment_counter("workloads_skipped")
+            return 0

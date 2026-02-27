@@ -211,14 +211,14 @@ class Utils:
             cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter)
             platform.environment["clusters"][cluster_name] = {}
             platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(platform, cluster_name)
-            
+
             # Check if metadata retrieval failed (status not found or metadata_not_found)
             metadata_status = platform.environment["clusters"][cluster_name]["metadata"].get("status")
             if metadata_status is None or metadata_status == "metadata_not_found":
                 self.logging.warning(f"[{cluster_name}] Metadata not found after all retries, skipping this cluster")
                 platform.environment["clusters"][cluster_name]["status"] = "metadata_not_found"
                 continue
-            
+
             platform.environment["clusters"][cluster_name]["status"] = metadata_status
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
             platform.environment["clusters"][cluster_name]["kubeconfig"] = platform.environment["clusters"][cluster_name]["path"] + "/kubeconfig"

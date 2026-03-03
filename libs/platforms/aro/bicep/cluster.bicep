@@ -621,5 +621,28 @@ resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview'
     serviceManagedIdentityReaderOnCloudNetworkMi
     serviceManagedIdentityReaderOnClusterApiAzureMi
     serviceManagedIdentityReaderOnKmsMi
+    rbacPropagationDelay
+  ]
+}
+
+// Delay to allow RBAC role assignments to propagate before HCP creation
+// Azure RBAC can take 1-5 minutes to fully propagate
+resource rbacPropagationDelay 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: '${clusterName}-rbac-delay'
+  location: resourceGroup().location
+  kind: 'AzurePowerShell'
+  properties: {
+    azPowerShellVersion: '9.7'
+    retentionInterval: 'PT1H'
+    scriptContent: 'Start-Sleep -Seconds 60'
+    timeout: 'PT5M'
+  }
+  dependsOn: [
+    dpDiskCsiDriverMiFederatedCredentialsRoleAssignment
+    dpFileCsiDriverMiFederatedCredentialsRoleAssignment
+    dpImageRegistryMiFederatedCredentialsRoleAssignment
+    serviceManagedIdentityRoleAssignmentVnet
+    serviceManagedIdentityRoleAssignmentSubnet
+    serviceManagedIdentityRoleAssignmentNSG
   ]
 }

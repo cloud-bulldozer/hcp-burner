@@ -406,30 +406,44 @@ class Utils:
         clean_env = {key: value for key, value in load_env.items() if value is not None}
         if not self.force_terminate:
             if load == "index":
-                self.logging.info(f"Checking cluster {cluster_name} for available monitoring operator using oc wait...")
+                self.logging.info(f"Checking cluster {cluster_name} monitoring operator stability for 2 minutes...")
 
-                health_cmd = "oc wait --for=condition=Available=True co/monitoring --timeout=60m"
+                for i in range(4):  # 4 checks × 30s = 2 minutes
+                    code, _, err = self.subprocess_exec(
+                        "oc wait --for=condition=Available=True co/monitoring --timeout=60m",
+                        extra_params={"env": clean_env, "universal_newlines": True}
+                    )
+                    if code != 0:
+                        self.logging.error(f"Cluster {cluster_name} monitoring operator not available. Skipping workload.")
+                        self.increment_counter("workloads_executed_failed")
+                        return 1
+                    self.logging.info(f"Cluster {cluster_name} monitoring check {i+1}/4 passed")
+                    if i < 3:
+                        time.sleep(30)
+
+                self.logging.info(f"Cluster {cluster_name} monitoring stable for 2 minutes. Proceeding with workload.")
 
             else:
                 self.logging.info(f"Checking cluster {cluster_name} health using oc adm wait-for-stable-cluster...")
 
                 health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
 
-            health_code, health_out, health_err = self.subprocess_exec(
-                health_cmd,
-                extra_params={"env": clean_env, "universal_newlines": True}
-            )
+                health_code, health_out, health_err = self.subprocess_exec(
+                    health_cmd,
+                    extra_params={"env": clean_env, "universal_newlines": True}
+                )
 
-            if health_code != 0:
-                self.logging.error(f"Cluster {cluster_name} is unhealthy or not stable. Skipping workload execution.")
-                self.logging.error(health_err)
-                self.increment_counter("workloads_executed_failed")
-                return 1
-            else:
+                if health_code != 0:
+                    self.logging.error(f"Cluster {cluster_name} is unhealthy or not stable. Skipping workload execution.")
+                    self.logging.error(health_err)
+                    self.increment_counter("workloads_executed_failed")
+                    return 1
+
                 self.logging.info(f"Cluster {cluster_name} is healthy. Proceeding with workload.")
                 if health_out:
                     for line in health_out.strip().splitlines():
                         self.logging.info(f"[{cluster_name}] {line}")
+
             load_code, load_out, load_err = self.subprocess_exec('./' + platform.environment['load']['script'], my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': clean_env})
             if load_code != 0:
                 self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/' + platform.environment['load']['script']} on {cluster_name}")

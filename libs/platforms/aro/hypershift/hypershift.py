@@ -479,9 +479,39 @@ class Hypershift(Aro):
 
             except HttpResponseError as err:
                 self.logging.error(f"[{cluster_name}] Failed to create ARO HCP cluster deployment: {err}")
-                cluster_info["status"] = "Failed - Cluster Deployment"
-                self.utils.increment_counter("clusters_created_failed")
-                return 1
+                # Retry checking cluster state for up to 5 minutes
+                self.logging.info(f"[{cluster_name}] Checking cluster state for up to 5 minutes...")
+                retry_timeout = 300  # 5 minutes
+                retry_interval = 30  # Check every 30 seconds
+                retry_start = datetime.datetime.now(datetime.timezone.utc).timestamp()
+
+                while datetime.datetime.now(datetime.timezone.utc).timestamp() < retry_start + retry_timeout:
+                    time.sleep(retry_interval)
+                    elapsed = int(datetime.datetime.now(datetime.timezone.utc).timestamp() - retry_start)
+                    self.logging.info(f"[{cluster_name}] Checking cluster provisioning state ({elapsed}s elapsed)...")
+
+                    metadata = self.get_metadata(platform, cluster_name)
+                    actual_state = metadata.get("status") or metadata.get("provisioning_state")
+
+                    if actual_state == "Succeeded":
+                        self.logging.info(f"[{cluster_name}] Cluster is in Succeeded state, continuing...")
+                        cluster_info["status"] = "ready"
+                        cluster_ready_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                        break
+                    elif actual_state == "Failed":
+                        self.logging.error(f"[{cluster_name}] Cluster is in Failed state")
+                        break
+                    else:
+                        self.logging.info(f"[{cluster_name}] Cluster state is '{actual_state}', waiting...")
+                else:
+                    # Timeout reached without success
+                    actual_state = None
+
+                if actual_state != "Succeeded":
+                    self.logging.error(f"[{cluster_name}] Cluster state is '{actual_state}' after 5 minutes, marking as failed")
+                    cluster_info["status"] = "Failed - Cluster Deployment"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
 
         except Exception as err:
             self.logging.error(f"[{cluster_name}] Unexpected error during cluster creation: {err}")
@@ -1083,22 +1113,49 @@ class Hypershift(Aro):
                 self.logging.error(f"[{cluster_name}] Location header not found in admin credential response")
                 raise Exception("Failed to get kubeconfig URL from admin credential response")
 
-            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {kubeconfig_url[:50]}...")
+            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {kubeconfig_url}...")
 
-            # Step 8: Wait before downloading
-            self.logging.info(f"[{cluster_name}] Step 8: Waiting 60 seconds before downloading kubeconfig...")
-            time.sleep(60)
+            # Step 8: Download Kubeconfig with retry (5 minutes, 30 sec interval)
+            self.logging.info(f"[{cluster_name}] Step 8: Downloading kubeconfig (retry for up to 5 minutes)")
+            retry_timeout = 300  # 5 minutes
+            retry_interval = 30  # 30 seconds
+            retry_start = datetime.datetime.now(datetime.timezone.utc).timestamp()
+            kubeconfig_content = None
 
-            # Step 9: Download Kubeconfig
-            self.logging.info(f"[{cluster_name}] Step 9: Downloading kubeconfig")
-            kubeconfig_response = requests.get(kubeconfig_url, headers=headers)
-            kubeconfig_response.raise_for_status()
-            kubeconfig_data = kubeconfig_response.json()
+            while datetime.datetime.now(datetime.timezone.utc).timestamp() < retry_start + retry_timeout:
+                elapsed = int(datetime.datetime.now(datetime.timezone.utc).timestamp() - retry_start)
+                self.logging.info(f"[{cluster_name}] Attempting kubeconfig download ({elapsed}s elapsed)...")
 
-            kubeconfig_content = kubeconfig_data.get("kubeconfig")
+                kubeconfig_response = requests.get(kubeconfig_url, headers=headers)
+
+                # Status 200 means success
+                if kubeconfig_response.status_code == 200:
+                    if kubeconfig_response.text:
+                        try:
+                            kubeconfig_data = kubeconfig_response.json()
+                            kubeconfig_content = kubeconfig_data.get("kubeconfig")
+                            if kubeconfig_content:
+                                self.logging.info(f"[{cluster_name}] Kubeconfig downloaded successfully")
+                                break
+                            else:
+                                self.logging.warning(f"[{cluster_name}] Response missing 'kubeconfig' key, retrying...")
+                        except json.JSONDecodeError as e:
+                            self.logging.warning(f"[{cluster_name}] Invalid JSON response: {e}, retrying...")
+                    else:
+                        self.logging.warning(f"[{cluster_name}] Empty response, retrying...")
+                # Status 202 means still processing
+                elif kubeconfig_response.status_code == 202:
+                    self.logging.info(f"[{cluster_name}] Kubeconfig not ready yet (status 202), retrying...")
+                else:
+                    self.logging.warning(f"[{cluster_name}] Kubeconfig download returned status {kubeconfig_response.status_code}, retrying...")
+
+                time.sleep(retry_interval)
+
             if not kubeconfig_content:
-                self.logging.error(f"[{cluster_name}] kubeconfig not found in response")
-                raise Exception("Failed to get kubeconfig from response")
+                self.logging.error(f"[{cluster_name}] Failed to download kubeconfig after 5 minutes")
+                self.logging.error(f"[{cluster_name}] Last response status: {kubeconfig_response.status_code}")
+                self.logging.error(f"[{cluster_name}] Last response: {kubeconfig_response.text[:500] if kubeconfig_response.text else 'Empty'}")
+                raise Exception("Failed to download kubeconfig after 5 minutes")
 
             # Save kubeconfig to file
             kubeconfig_path = os.path.join(path, "kubeconfig")

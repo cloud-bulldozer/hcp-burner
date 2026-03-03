@@ -3,7 +3,8 @@
 # Copy and fill in empty environment variables
 
 ts="$(date -u +%Y%m%d)"
-external_log_file_ts="$(date -u +%Y%m%d-%H%M%S)"
+# Used in commented example commands below
+_external_log_file_ts="$(date -u +%Y%m%d-%H%M%S)"
 
 # Adjust for each new run
 iteration=${ts}-run1
@@ -66,16 +67,16 @@ export TF_CLI_ARGS_apply="-parallelism=50"
 
 # create, workload, delete the clusters
 #export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}.log
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --enable-workload --cleanup-clusters --delete-vpcs 2>&1 | tee ${external_log_file_ts}-complete.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --enable-workload --cleanup-clusters --delete-vpcs 2>&1 | tee ${_external_log_file_ts}-complete.log
 # create, no workload, delete
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --cleanup-clusters --delete-vpcs 2>&1 | tee ${external_log_file_ts}-install-delete.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs --cleanup-clusters --delete-vpcs 2>&1 | tee ${_external_log_file_ts}-install-delete.log
 
 # Each a separate step
 #export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}-install.log
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs 2>&1 | tee ${external_log_file_ts}-install.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --install-clusters --create-vpcs 2>&1 | tee ${_external_log_file_ts}-install.log
 
 #export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}-workload.log
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --enable-workload 2>&1 | tee ${external_log_file_ts}-workload.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --enable-workload 2>&1 | tee ${_external_log_file_ts}-workload.log
 
 #export HCP_BURNER_LOG_FILE=/root/rosa/hcpb-${iteration}-cleanup.log
-#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --cleanup-clusters --delete-vpcs 2>&1 | tee ${external_log_file_ts}-cleanup.log
+#python3 hcp-burner.py --platform rosa --wait-for-workers --es-insecure --cleanup-clusters --delete-vpcs 2>&1 | tee ${_external_log_file_ts}-cleanup.log

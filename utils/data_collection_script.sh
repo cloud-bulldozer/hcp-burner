@@ -101,7 +101,7 @@ if [ ! -d "$1" ]; then
   exit 1
 fi
 
-kcs=($(ls "${1}" | grep kubeconfig))
+mapfile -t kcs < <(find "${1}" -maxdepth 1 -name "*kubeconfig*" -printf '%f\n')
 
 for item in "${kcs[@]}"; do
   if [[ "$item" =~ "sc" ]]; then

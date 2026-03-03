@@ -25,7 +25,7 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--install-clusters", action="store_true", help="Start bringing up clusters")
 
-        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa", "azure"])
+        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa", "azure", "aro"])
         self.common_parser.add_argument("--subplatform", dest="subplatform", action=EnvDefault, env=environment, envvar="HCP_BURNER_SUBPLATFORM", help="Subplatforms of Platform")
 
         self.common_parser.add_argument("--uuid", action=EnvDefault, env=environment, envvar="HCP_BURNER_UUID")

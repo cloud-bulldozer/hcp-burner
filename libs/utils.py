@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import os
 import sys
-import shutil
 import errno
 import string
 import signal
@@ -10,6 +9,7 @@ import random
 import time
 import subprocess
 import threading
+from datetime import datetime, timedelta
 from git import Repo
 
 
@@ -17,10 +17,92 @@ class Utils:
     def __init__(self, logging):
         self.logging = logging
         self.force_terminate = False
+        # Counters for tracking execution summary
+        self.counters = {
+            "clusters_requested": 0,
+            "clusters_created_success": 0,
+            "clusters_created_failed": 0,
+            "workloads_executed_success": 0,
+            "workloads_executed_failed": 0,
+            "workloads_skipped": 0,
+            "clusters_deleted_success": 0,
+            "clusters_deleted_failed": 0,
+        }
+        self._counter_lock = threading.Lock()
+        # Pre-validated AZURE_PROM_TOKEN for ARO workloads
+        self.azure_prom_token = None
 
     def set_force_terminate(self, signum, frame):
         self.logging.warning("Captured Ctrl-C, sending exit event to watcher, any cluster install/delete will continue its execution")
         self.force_terminate = True
+
+    def increment_counter(self, counter_name, value=1):
+        """Thread-safe counter increment"""
+        with self._counter_lock:
+            if counter_name in self.counters:
+                self.counters[counter_name] += value
+
+    def print_execution_summary(self, platform):
+        """Print execution summary at the end of the run"""
+        self.logging.info("=" * 60)
+        self.logging.info("EXECUTION SUMMARY")
+        self.logging.info("=" * 60)
+
+        # Installation summary
+        requested = self.counters["clusters_requested"]
+        created_success = self.counters["clusters_created_success"]
+        created_failed = self.counters["clusters_created_failed"]
+
+        self.logging.info("Installation Phase:")
+        self.logging.info(f"  * Clusters Requested:          {requested}")
+        self.logging.info(f"  * Clusters Created Successfully: {created_success}")
+        self.logging.info(f"  * Clusters Failed to Create:     {created_failed}")
+        if requested > 0:
+            success_rate = (created_success / requested) * 100
+            self.logging.info(f"  * Success Rate:                  {success_rate:.1f}%")
+
+        # Workload summary
+        workload_success = self.counters["workloads_executed_success"]
+        workload_failed = self.counters["workloads_executed_failed"]
+        workload_skipped = self.counters["workloads_skipped"]
+        workload_total = workload_success + workload_failed + workload_skipped
+
+        self.logging.info("")
+        self.logging.info("Workload Phase:")
+        self.logging.info(f"  * Workloads Executed Successfully: {workload_success}")
+        self.logging.info(f"  * Workloads Failed:                {workload_failed}")
+        self.logging.info(f"  * Workloads Skipped:               {workload_skipped}")
+        if workload_total > 0:
+            success_rate = (workload_success / workload_total) * 100 if (workload_success + workload_failed) > 0 else 0
+            self.logging.info(f"  * Success Rate:                    {success_rate:.1f}%")
+
+        # Cleanup summary
+        deleted_success = self.counters["clusters_deleted_success"]
+        deleted_failed = self.counters["clusters_deleted_failed"]
+        deleted_total = deleted_success + deleted_failed
+
+        self.logging.info("")
+        self.logging.info("Cleanup Phase:")
+        self.logging.info(f"  * Clusters Deleted Successfully: {deleted_success}")
+        self.logging.info(f"  * Clusters Failed to Delete:     {deleted_failed}")
+        if deleted_total > 0:
+            success_rate = (deleted_success / deleted_total) * 100
+            self.logging.info(f"  * Success Rate:                  {success_rate:.1f}%")
+
+        # List failed clusters if any
+        failed_clusters = []
+        for cluster_name, cluster_info in platform.environment.get("clusters", {}).items():
+            status = cluster_info.get("status", "unknown")
+            if "Failed" in status or status in ("thread_failed", "metadata_not_found", "Delete Failed"):
+                failed_clusters.append((cluster_name, status))
+
+        if failed_clusters:
+            self.logging.info("")
+            self.logging.info("Failed Clusters:")
+            for cluster_name, status in failed_clusters:
+                self.logging.info(f"  * {cluster_name}: {status}")
+
+        self.logging.info("=" * 60)
 
     def disable_signals(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -128,35 +210,97 @@ class Utils:
         loop_counter = 0
         while loop_counter < platform.environment["cluster_count"]:
             loop_counter += 1
-            cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
+            cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter)
             platform.environment["clusters"][cluster_name] = {}
             platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(platform, cluster_name)
-            platform.environment["clusters"][cluster_name]["status"] = platform.environment["clusters"][cluster_name]["metadata"]["status"]
+
+            # Check if metadata retrieval failed (status not found or metadata_not_found)
+            metadata_status = platform.environment["clusters"][cluster_name]["metadata"].get("status")
+            if metadata_status is None or metadata_status == "metadata_not_found":
+                self.logging.warning(f"[{cluster_name}] Metadata not found after all retries, skipping this cluster")
+                platform.environment["clusters"][cluster_name]["status"] = "metadata_not_found"
+                continue
+
+            platform.environment["clusters"][cluster_name]["status"] = metadata_status
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
             platform.environment["clusters"][cluster_name]["kubeconfig"] = platform.environment["clusters"][cluster_name]["path"] + "/kubeconfig"
             platform.environment['clusters'][cluster_name]['workers'] = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
         return platform
 
+    def validate_azure_prom_token(self, platform, phase="workload"):
+        """Validate and load AZURE_PROM_TOKEN from file or environment variable."""
+        if platform.environment.get("platform") != "aro":
+            return True
+
+        azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
+
+        # Option 1: Token file provided
+        if azure_prom_token_path and os.path.exists(azure_prom_token_path):
+            file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(azure_prom_token_path))
+            if file_age > timedelta(hours=1):
+                self.logging.warning(f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age})")
+                try:
+                    if input(f"[{phase}] Update token file and confirm (yes/no): ").strip().lower() not in ['yes', 'y']:
+                        self.azure_prom_token = None
+                        return False
+                except (EOFError, KeyboardInterrupt):
+                    self.azure_prom_token = None
+                    return False
+            try:
+                with open(azure_prom_token_path, 'r') as f:
+                    self.azure_prom_token = f.read().strip()
+                self.logging.info(f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path}")
+                return True
+            except Exception as err:
+                self.logging.error(f"[{phase}] Failed to read token file: {err}")
+                self.azure_prom_token = None
+                return False
+
+        # Option 2: Environment variable
+        if "AZURE_PROM_TOKEN" in os.environ:
+            self.azure_prom_token = os.environ["AZURE_PROM_TOKEN"]
+            self.logging.info(f"[{phase}] Using AZURE_PROM_TOKEN from environment")
+            return True
+
+        self.logging.warning(f"[{phase}] No AZURE_PROM_TOKEN available")
+        self.azure_prom_token = None
+        return False
+
     def load_scheduler(self, platform):
         load_thread_list = []
         self.logging.info(f"Attempting to start {platform.environment['load']['executor']} {platform.environment['load']['workload']} load process on {len(platform.environment['clusters'])} clusters")
+
+        # Validate AZURE_PROM_TOKEN for workload phase
+        if platform.environment.get("platform") == "aro":
+            self.validate_azure_prom_token(platform, phase="workload")
+
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.debug(cluster_info)
-            if cluster_info['status'] in ("ready", "Completed"):
+            if cluster_info['status'] in ("ready", "installed", "Completed", "Succeeded"):
                 self.logging.info(f"Attempting to start load process on {cluster_name}")
                 try:
                     thread = threading.Thread(target=self.cluster_load, args=(platform, cluster_name))
                 except Exception as err:
                     self.logging.error("Thread creation failed")
                     self.logging.error(err)
+                    self.increment_counter("workloads_executed_failed")
+                    continue
                 load_thread_list.append(thread)
                 thread.start()
+            else:
+                self.logging.warning(f"[{cluster_name}] Skipping workload execution, cluster status: {cluster_info['status']}")
+                self.increment_counter("workloads_skipped")
         return load_thread_list
 
     def install_scheduler(self, platform):
         self.logging.info(
             f"Attempting to start {platform.environment['cluster_count']} clusters with {platform.environment['batch_size']} batch size"
         )
+
+        # Validate AZURE_PROM_TOKEN before cluster creation for ARO platform
+        if platform.environment.get("platform") == "aro":
+            self.validate_azure_prom_token(platform, phase="install")
+
         cluster_thread_list = []
         batch_count = 0
         loop_counter = 0
@@ -186,11 +330,12 @@ class Utils:
                         loop_counter += 1
                         create_cluster = True
                     if create_cluster:
+                        self.increment_counter("clusters_requested")
                         if platform.environment["workers"].isdigit():
                             cluster_workers = int(platform.environment["workers"])
                         else:
                             cluster_workers = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
-                        cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter).zfill(4)
+                        cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter)
                         platform.environment["clusters"][cluster_name] = {}
                         try:
                             platform.environment["clusters"][cluster_name]["workers"] = cluster_workers
@@ -202,6 +347,7 @@ class Utils:
                             self.logging.error(f"Failed to create cluster {cluster_name}")
                             self.logging.error(err)
                             platform.environment["clusters"][cluster_name]["status"] = "thread_failed"
+                            self.increment_counter("clusters_created_failed")
                         cluster_thread_list.append(thread)
                         thread.start()
                         self.logging.debug("Number of alive threads %d" % threading.active_count())
@@ -220,7 +366,18 @@ class Utils:
             del platform.environment['clusters'][cluster_name]['cluster_end_time']
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
-        load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
+
+        # Use pre-validated AZURE_PROM_TOKEN for ARO platform (validated once in load_scheduler)
+        if platform.environment.get("platform") == "aro":
+            if self.azure_prom_token:
+                load_env["AZURE_PROM_TOKEN"] = self.azure_prom_token
+            else:
+                # No valid token available, remove MC_KUBECONFIG if present
+                if "MC_KUBECONFIG" in load_env:
+                    del load_env["MC_KUBECONFIG"]
+        else:
+            load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
+
         if not os.path.exists(my_path + '/workload'):
             self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
             try:
@@ -228,6 +385,7 @@ class Utils:
             except Exception as err:
                 self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
                 self.logging.error(err)
+                self.increment_counter("workloads_executed_failed")
                 return 1
         # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
         # shutil.copy2(platform.environment['load']['executor'], my_path)
@@ -248,31 +406,54 @@ class Utils:
         clean_env = {key: value for key, value in load_env.items() if value is not None}
         if not self.force_terminate:
             if load == "index":
-                self.logging.info(f"Checking cluster {cluster_name} for available monitoring operator using oc wait...")
+                self.logging.info(f"Checking cluster {cluster_name} monitoring operator stability for 2 minutes...")
 
-                health_cmd = "oc wait --for=condition=Available=True co/monitoring --timeout=60m"
+                for i in range(4):  # 4 checks × 30s = 2 minutes
+                    code, _, err = self.subprocess_exec(
+                        "oc wait --for=condition=Available=True co/monitoring --timeout=60m",
+                        extra_params={"env": clean_env, "universal_newlines": True}
+                    )
+                    if code != 0:
+                        self.logging.error(f"Cluster {cluster_name} monitoring operator not available. Skipping workload.")
+                        self.increment_counter("workloads_executed_failed")
+                        return 1
+                    self.logging.info(f"Cluster {cluster_name} monitoring check {i+1}/4 passed")
+                    if i < 3:
+                        time.sleep(30)
+
+                self.logging.info(f"Cluster {cluster_name} monitoring stable for 2 minutes. Proceeding with workload.")
 
             else:
                 self.logging.info(f"Checking cluster {cluster_name} health using oc adm wait-for-stable-cluster...")
 
                 health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
 
-            health_code, health_out, health_err = self.subprocess_exec(
-                health_cmd,
-                extra_params={"env": clean_env, "universal_newlines": True}
-            )
+                health_code, health_out, health_err = self.subprocess_exec(
+                    health_cmd,
+                    extra_params={"env": clean_env, "universal_newlines": True}
+                )
 
-            if health_code != 0:
-                self.logging.error(f"Cluster {cluster_name} is unhealthy or not stable. Skipping workload execution.")
-                self.logging.error(health_err)
-                return 1
-            else:
+                if health_code != 0:
+                    self.logging.error(f"Cluster {cluster_name} is unhealthy or not stable. Skipping workload execution.")
+                    self.logging.error(health_err)
+                    self.increment_counter("workloads_executed_failed")
+                    return 1
+
                 self.logging.info(f"Cluster {cluster_name} is healthy. Proceeding with workload.")
                 if health_out:
                     for line in health_out.strip().splitlines():
                         self.logging.info(f"[{cluster_name}] {line}")
+
             load_code, load_out, load_err = self.subprocess_exec('./' + platform.environment['load']['script'], my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': clean_env})
             if load_code != 0:
                 self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/' + platform.environment['load']['script']} on {cluster_name}")
+                self.increment_counter("workloads_executed_failed")
+                return 1
+            else:
+                self.logging.info(f"[{cluster_name}] Workload executed successfully")
+                self.increment_counter("workloads_executed_success")
+                return 0
         else:
             self.logging.warning(f"Not starting workload on {cluster_name} after capturing Ctrl-C")
+            self.increment_counter("workloads_skipped")
+            return 0

@@ -49,7 +49,7 @@ if __name__ == "__main__":
     platform.initialize()
 
     ts_install_clusters = time.time()
-    logging.info(f"Starting install clusters phase")
+    logging.info("Starting install clusters phase")
     if str(platform.environment['install_clusters']).lower() == "true":
         logging.info("Starting capturing Ctrl-C key from this point")
         signal.signal(signal.SIGINT, utils.set_force_terminate)
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         logging.info("Install clusters phase skipped")
 
     ts_workloads = time.time()
-    logging.info(f"Start workloads phase")
+    logging.info("Start workloads phase")
     if 'enabled' in platform.environment['load'] and str(platform.environment['load']['enabled']).lower() == "true":
         platform = utils.get_cluster_info(platform)
         load_threads = utils.load_scheduler(platform)
@@ -94,7 +94,7 @@ if __name__ == "__main__":
         logging.info("Workloads phase skipped")
 
     ts_cleanup_clusters = time.time()
-    logging.info(f"Starting cleanup clusters phase")
+    logging.info("Starting cleanup clusters phase")
     if str(platform.environment["cleanup_clusters"]).lower() == "true":
         platform = utils.get_cluster_info(platform)
         delete_threads = utils.cleanup_scheduler(platform)
@@ -116,21 +116,23 @@ if __name__ == "__main__":
     end_time = time.time()
 
     # Report phase durations
-    logging.info(f"HCP-burner Phases")
+    logging.info("HCP-burner Phases")
     logging.info(f"* Install Phase: {datetime.fromtimestamp(ts_install_clusters, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} to {datetime.fromtimestamp(ts_workloads, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
     if str(platform.environment['install_clusters']).lower() == "true":
         logging.info(f"  * Install clusters phase duration: {round(ts_workloads - ts_install_clusters)} seconds")
     else:
-        logging.info(f"  * Install clusters phase duration: Skipped")
+        logging.info("  * Install clusters phase duration: Skipped")
     logging.info(f"* Workloads Phase: {datetime.fromtimestamp(ts_workloads, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} to {datetime.fromtimestamp(ts_cleanup_clusters, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
     if 'enabled' in platform.environment['load'] and str(platform.environment['load']['enabled']).lower() == "true":
         logging.info(f"  * Workloads phase duration: {round(ts_cleanup_clusters - ts_workloads)} seconds")
     else:
-        logging.info(f"  * Workloads phase duration: Skipped")
+        logging.info("  * Workloads phase duration: Skipped")
     logging.info(f"* Cleanup Phase: {datetime.fromtimestamp(ts_cleanup_clusters, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} to {datetime.fromtimestamp(end_time, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
     if str(platform.environment["cleanup_clusters"]).lower() == "true":
         logging.info(f"  * Cleanup clusters phase duration: {round(end_time - ts_cleanup_clusters)} seconds")
     else:
-        logging.info(f"  * Cleanup clusters phase duration: Skipped")
+        logging.info("  * Cleanup clusters phase duration: Skipped")
     logging.info(f"* Total duration: {round(end_time - ts_start)} seconds")
-    # utils.test_recap(platform)
+
+    # Print execution summary
+    utils.print_execution_summary(platform)

@@ -3,3 +3,4 @@ __pycache__/
 site/
 .hcp-burner/
 *.log
+*.code-workspace

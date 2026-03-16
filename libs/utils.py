@@ -29,8 +29,6 @@ class Utils:
             "clusters_deleted_failed": 0,
         }
         self._counter_lock = threading.Lock()
-        # Pre-validated AZURE_PROM_TOKEN for ARO workloads
-        self.azure_prom_token = None
 
     def set_force_terminate(self, signum, frame):
         self.logging.warning("Captured Ctrl-C, sending exit event to watcher, any cluster install/delete will continue its execution")
@@ -228,7 +226,7 @@ class Utils:
         return platform
 
     def validate_azure_prom_token(self, platform, phase="workload"):
-        """Validate and load AZURE_PROM_TOKEN from file or environment variable."""
+        """Validate AZURE_PROM_TOKEN file exists and is not stale."""
         if platform.environment.get("platform") != "aro":
             return True
 
@@ -241,29 +239,18 @@ class Utils:
                 self.logging.warning(f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age})")
                 try:
                     if input(f"[{phase}] Update token file and confirm (yes/no): ").strip().lower() not in ['yes', 'y']:
-                        self.azure_prom_token = None
                         return False
                 except (EOFError, KeyboardInterrupt):
-                    self.azure_prom_token = None
                     return False
-            try:
-                with open(azure_prom_token_path, 'r') as f:
-                    self.azure_prom_token = f.read().strip()
-                self.logging.info(f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path}")
-                return True
-            except Exception as err:
-                self.logging.error(f"[{phase}] Failed to read token file: {err}")
-                self.azure_prom_token = None
-                return False
+            self.logging.info(f"[{phase}] AZURE_PROM_TOKEN file validated: {azure_prom_token_path}")
+            return True
 
         # Option 2: Environment variable
         if "AZURE_PROM_TOKEN" in os.environ:
-            self.azure_prom_token = os.environ["AZURE_PROM_TOKEN"]
-            self.logging.info(f"[{phase}] Using AZURE_PROM_TOKEN from environment")
+            self.logging.info(f"[{phase}] AZURE_PROM_TOKEN environment variable available")
             return True
 
         self.logging.warning(f"[{phase}] No AZURE_PROM_TOKEN available")
-        self.azure_prom_token = None
         return False
 
     def load_scheduler(self, platform):
@@ -367,45 +354,58 @@ class Utils:
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
 
-        # Use pre-validated AZURE_PROM_TOKEN for ARO platform (validated once in load_scheduler)
+        # Load AZURE_PROM_TOKEN for ARO platform (read fresh for each cluster)
         if platform.environment.get("platform") == "aro":
-            if self.azure_prom_token:
-                load_env["AZURE_PROM_TOKEN"] = self.azure_prom_token
-            else:
-                # No valid token available, remove MC_KUBECONFIG if present
-                if "MC_KUBECONFIG" in load_env:
-                    del load_env["MC_KUBECONFIG"]
+            azure_prom_token = None
+            azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
+
+            if azure_prom_token_path and os.path.exists(azure_prom_token_path):
+                try:
+                    with open(azure_prom_token_path, 'r') as f:
+                        azure_prom_token = f.read().strip()
+                    self.logging.info(f"[{cluster_name}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path}")
+                except Exception as err:
+                    self.logging.warning(f"[{cluster_name}] Failed to read token file: {err}")
+            elif "AZURE_PROM_TOKEN" in os.environ:
+                azure_prom_token = os.environ["AZURE_PROM_TOKEN"]
+
+            if azure_prom_token:
+                load_env["AZURE_PROM_TOKEN"] = azure_prom_token
+            elif "MC_KUBECONFIG" in load_env:
+                del load_env["MC_KUBECONFIG"]
         else:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
 
         if not os.path.exists(my_path + '/workload'):
-            self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
+            branch = platform.environment['load'].get('branch', 'master')
+            self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} (branch: {branch}) on {my_path}/workload")
             try:
-                Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
+                Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload', branch=branch)
             except Exception as err:
-                self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
+                self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']} (branch: {branch})")
                 self.logging.error(err)
                 self.increment_counter("workloads_executed_failed")
                 return 1
         # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
         # shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        if load == "index":
-            load_env["EXTRA_FLAGS"] = "--check-health=False"
+        workload_name = load if load != "" else platform.environment['load']['workload']
+        if workload_name == "index":
+            load_env["EXTRA_FLAGS"] = ""
         else:
-            load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
+            load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --churn-mode=objects --timeout=24h"
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"
-        load_env["WORKLOAD"] = load if load != "" else platform.environment['load']['workload']
-        log_file = load if load != "" else platform.environment['load']['workload']
+        load_env["WORKLOAD"] = workload_name
+        log_file = workload_name
         load_env["KUBE_DIR"] = my_path
         keys_with_none = [key for key, value in load_env.items() if value is None]
         if keys_with_none:
             self.logging.info(f"Removing environment variables with None value: {', '.join(keys_with_none)}")
         clean_env = {key: value for key, value in load_env.items() if value is not None}
         if not self.force_terminate:
-            if load == "index":
+            if workload_name == "index":
                 self.logging.info(f"Checking cluster {cluster_name} monitoring operator stability for 2 minutes...")
 
                 for i in range(4):  # 4 checks × 30s = 2 minutes
@@ -444,6 +444,7 @@ class Utils:
                     for line in health_out.strip().splitlines():
                         self.logging.info(f"[{cluster_name}] {line}")
 
+            self.logging.info(f"[{cluster_name}] Running workload '{workload_name}' with {load_env['ITERATIONS']} iterations, extra flags: {load_env.get('EXTRA_FLAGS', '')}")
             load_code, load_out, load_err = self.subprocess_exec('./' + platform.environment['load']['script'], my_path + '/' + log_file + '.log', extra_params={'cwd': my_path + "/workload/" + platform.environment['load']['script_path'], 'env': clean_env})
             if load_code != 0:
                 self.logging.error(f"Failed to execute workload {platform.environment['load']['script_path'] + '/' + platform.environment['load']['script']} on {cluster_name}")

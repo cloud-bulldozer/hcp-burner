@@ -497,6 +497,46 @@ class Rosa(Platform):
         self.logging.info("Watcher terminated")
 
 
+    def _move_infra_components(self, cluster_name, kubeconfig):
+        """Move infrastructure components (monitoring, ingress) to infra nodes."""
+        self.logging.info(f"[{cluster_name}] Moving infrastructure components to infra nodes")
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+
+        success = True
+
+        # 1. Restart prometheus-k8s statefulset to pick up infra node scheduling
+        self.logging.info(f"[{cluster_name}] Restarting prometheus-k8s statefulset")
+        restart_code, restart_out, restart_err = self.utils.subprocess_exec(
+            "oc rollout restart -n openshift-monitoring statefulset/prometheus-k8s",
+            extra_params={"env": myenv, "universal_newlines": True}
+        )
+        if restart_code != 0:
+            self.logging.error(f"[{cluster_name}] Failed to restart prometheus-k8s: {restart_err}")
+            success = False
+        else:
+            self.logging.info(f"[{cluster_name}] prometheus-k8s statefulset restarted successfully")
+
+        # 2. Patch IngressController to use infra nodes
+        self.logging.info(f"[{cluster_name}] Patching IngressController to use infra nodes")
+        ingress_patch_path = os.path.join(os.path.dirname(__file__), "files", "ingress-infra-patch.yaml")
+        if not os.path.exists(ingress_patch_path):
+            self.logging.error(f"[{cluster_name}] Ingress patch file not found: {ingress_patch_path}")
+            success = False
+        else:
+            patch_code, patch_out, patch_err = self.utils.subprocess_exec(
+                f"oc patch ingresscontroller/default -n openshift-ingress-operator --type=merge --patch-file={ingress_patch_path}",
+                extra_params={"env": myenv, "universal_newlines": True}
+            )
+            if patch_code != 0:
+                self.logging.error(f"[{cluster_name}] Failed to patch IngressController: {patch_err}")
+                success = False
+            else:
+                self.logging.info(f"[{cluster_name}] IngressController patched successfully")
+
+        return success
+
+
 class RosaArguments(PlatformArguments):
     def __init__(self, parser, config_file, environment):
         super().__init__(parser, config_file, environment)

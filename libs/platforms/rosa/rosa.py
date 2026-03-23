@@ -454,7 +454,8 @@ class Rosa(Platform):
                                                                + "/kubeconfig",
                                                                cluster["name"],
                                                                )
-                        if ready_workers == required_workers:
+                        self.logging.debug(f"Cluster {cluster['name']}: ready_workers={ready_workers}, required_workers={required_workers}")
+                        if ready_workers >= required_workers:
                             clusters_with_all_workers += 1
                     elif state_key != "":
                         state[state_key] = state.get(state_key, 0) + 1

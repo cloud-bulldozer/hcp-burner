@@ -236,7 +236,7 @@ class Rosa(Platform):
         start_time = int(datetime.datetime.utcnow().timestamp())
         previous_status = ""
         self.logging.info(f"Collecting preflight times for cluster {cluster_name} during 120 minutes until {datetime.datetime.fromtimestamp(start_time + 120 * 60)}")
-        # Waiting 1 hour for preflight checks to end
+        # Waiting 2 hours for preflight checks to end
         while datetime.datetime.utcnow().timestamp() < start_time + 120 * 60:
             if self.utils.force_terminate:
                 self.logging.error(f"Exiting preflight times capturing on {cluster_name} cluster after capturing Ctrl-C")
@@ -254,8 +254,8 @@ class Rosa(Platform):
                 return_data[previous_status] = current_time - start_time
                 start_time = current_time
                 self.logging.info(f"Cluster {cluster_name} moved from {previous_status} status to {current_status} status after {return_data[previous_status]} seconds")
-                if current_status == "installing":
-                    self.logging.info(f"Cluster {cluster_name} is on installing status. Exiting preflights waiting...")
+                if current_status == "installing" or current_status == "ready":
+                    self.logging.info(f"Cluster {cluster_name} is on {current_status} status. Exiting preflights waiting...")
                     return return_data
             else:
                 self.logging.debug(f"Cluster {cluster_name} on {current_status} status. Waiting 2 seconds until {datetime.datetime.fromtimestamp(start_time + 120 * 60)} for next check")

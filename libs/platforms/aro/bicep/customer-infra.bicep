@@ -7,6 +7,12 @@ param customerVnetName string
 @description('Subnet Name')
 param customerVnetSubnetName string
 
+@description('Enable SWIFT networking with additional pod network subnet')
+param swift bool = true
+
+@description('Pod Network Subnet Name (used when SWIFT is enabled)')
+param customerVnetPodNetworkSubnetName string = ''
+
 var randomSuffix = toLower(uniqueString(resourceGroup().id))
 
 // The Key Vault Name is defined here in a variable instead of using a
@@ -17,6 +23,7 @@ var customerKeyVaultName string = 'cust-kv-${randomSuffix}'
 
 var addressPrefix = '10.0.0.0/16'
 var subnetPrefix = '10.0.0.0/23'
+var podNetworkSubnetPrefix = '10.0.2.0/23'
 
 resource customerNsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
   name: customerNsgName
@@ -25,6 +32,38 @@ resource customerNsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
     persist: 'true'
   }
 }
+
+var baseSubnets = [
+  {
+    name: customerVnetSubnetName
+    properties: {
+      addressPrefix: subnetPrefix
+      networkSecurityGroup: {
+        id: customerNsg.id
+      }
+    }
+  }
+]
+
+var swiftSubnets = swift ? [
+  {
+    name: customerVnetPodNetworkSubnetName
+    properties: {
+      addressPrefix: podNetworkSubnetPrefix
+      networkSecurityGroup: {
+        id: customerNsg.id
+      }
+      delegations: [
+        {
+          name: 'aro-hcp-delegation'
+          properties: {
+            serviceName: 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters'
+          }
+        }
+      ]
+    }
+  }
+] : []
 
 resource customerVnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
   name: customerVnetName
@@ -38,17 +77,7 @@ resource customerVnet 'Microsoft.Network/virtualNetworks@2023-05-01' = {
         addressPrefix
       ]
     }
-    subnets: [
-      {
-        name: customerVnetSubnetName
-        properties: {
-          addressPrefix: subnetPrefix
-          networkSecurityGroup: {
-            id: customerNsg.id
-          }
-        }
-      }
-    ]
+    subnets: concat(baseSubnets, swiftSubnets)
   }
 }
 

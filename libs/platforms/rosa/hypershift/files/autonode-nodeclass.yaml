@@ -1,0 +1,12 @@
+apiVersion: karpenter.hypershift.openshift.io/v1beta1
+kind: OpenshiftEC2NodeClass
+metadata:
+  name: example-nodeclass
+spec:
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: __CLUSTER_ID__
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: __CLUSTER_ID__
+

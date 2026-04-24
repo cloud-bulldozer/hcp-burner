@@ -46,6 +46,9 @@ class Hypershift(Rosa):
             else:
                 self.logging.info(f"No VPC will be created, using {arguments['wildcard_options']}")
 
+        self.environment["autonode"] = arguments["autonode"]
+        self.environment["autonode_iam_role_arn"] = arguments["autonode_iam_role_arn"]
+
     def initialize(self):
         super().initialize()
 
@@ -68,6 +71,22 @@ class Hypershift(Rosa):
         self.logging.info("Verifying Operator Roles")
         if self.environment["common_operator_roles"]:
             sys.exit("Exiting") if not self._create_operator_roles() else self.logging.info(f"Using {self.environment['cluster_name_seed']} as Operator Roles Prefix")
+
+        # Validate autonode IAM role ARN
+        if self.environment["autonode"]:
+            role_arn = self.environment["autonode_iam_role_arn"]
+            self.logging.info(f"Verifying autonode IAM role ARN: {role_arn}")
+            # Extract role name from ARN (last segment after '/')
+            role_name = role_arn.split("/")[-1] if "/" in role_arn else role_arn
+            arn_code, arn_out, arn_err = self.utils.subprocess_exec(
+                f"aws iam get-role --role-name {role_name}",
+                extra_params={"universal_newlines": True}
+            )
+            if arn_code != 0:
+                self.logging.error(f"Autonode IAM role ARN does not exist or is not accessible: {role_arn}")
+                sys.exit("Exiting...")
+            else:
+                self.logging.info(f"Autonode IAM role ARN verified: {role_arn}")
 
         # Create VPCs
         if self.environment["create_vpcs"]:
@@ -303,6 +322,34 @@ class Hypershift(Rosa):
         cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
         cluster_info["install_method"] = "rosa"
         cluster_info["mgmt_cluster_name"] = self._get_mc(cluster_info["metadata"]["cluster_id"])
+        # Clean up autonode CRs before deleting the cluster
+        if platform.environment.get("autonode", False) and cluster_info.get("kubeconfig"):
+            self.logging.info(f"[{cluster_name}] Cleaning up autonode resources before cluster deletion")
+            myenv = os.environ.copy()
+            myenv["KUBECONFIG"] = cluster_info["kubeconfig"]
+
+            # Delete NodePool CR
+            np_code, np_out, np_err = self.utils.subprocess_exec(
+                "oc delete nodepool test-pool --ignore-not-found",
+                extra_params={"env": myenv, "universal_newlines": True},
+                log_output=False
+            )
+            if np_code == 0:
+                self.logging.info(f"[{cluster_name}] NodePool CR deleted")
+            else:
+                self.logging.warning(f"[{cluster_name}] Failed to delete NodePool CR: {np_err}")
+
+            # Delete OpenshiftEC2NodeClass CR
+            nc_code, nc_out, nc_err = self.utils.subprocess_exec(
+                "oc delete openshiftec2nodeclass example-nodeclass --ignore-not-found",
+                extra_params={"env": myenv, "universal_newlines": True},
+                log_output=False
+            )
+            if nc_code == 0:
+                self.logging.info(f"[{cluster_name}] OpenshiftEC2NodeClass CR deleted")
+            else:
+                self.logging.warning(f"[{cluster_name}] Failed to delete OpenshiftEC2NodeClass CR: {nc_err}")
+
         self.logging.info(f"Deleting cluster {cluster_name} on Hypershift Platform")
         cleanup_code, cleanup_out, cleanup_err = self.utils.subprocess_exec("rosa delete cluster -c " + cluster_name + " -y --watch", cluster_info["path"] + "/cleanup.log", {'preexec_fn': self.utils.disable_signals})
         cluster_delete_end_time = int(datetime.datetime.utcnow().timestamp())
@@ -446,6 +493,24 @@ class Hypershift(Rosa):
         cluster_info["hostedclusters"] = self.environment["cluster_count"]
         cluster_info["environment"] = self.environment["rosa_env"]
         cluster_info["install_method"] = "rosa"
+
+        # Check if cluster already exists
+        check_code, check_out, check_err = self.utils.subprocess_exec(
+            f"rosa describe cluster -c {cluster_name} -o json",
+            extra_params={"universal_newlines": True},
+            log_output=False
+        )
+        if check_code == 0:
+            try:
+                existing = json.loads(check_out)
+                state = existing.get("state", "unknown")
+                self.logging.warning(f"Cluster {cluster_name} already exists with state '{state}'. Skipping creation.")
+                cluster_info["status"] = state
+                cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
+                return 0
+            except (json.JSONDecodeError, KeyError):
+                pass
+
         self.logging.info(f"Creating cluster {cluster_info['index']} on Hypershift with name {cluster_name} and {cluster_info['workers']} workers")
         cluster_info["path"] = platform.environment["path"] + "/" + cluster_name
         os.mkdir(cluster_info["path"])
@@ -542,6 +607,29 @@ class Hypershift(Rosa):
                 cluster_info["workers_wait_time"] = None
                 cluster_info["status"] = "Ready. Not Access"
                 return 1
+            # Enable autonode if requested
+            if platform.environment.get("autonode", False):
+                cluster_id = cluster_info["metadata"]["cluster_id"]
+                region = platform.environment["aws"]["region"]
+
+                # Step 1: Enable autonode via rosa edit
+                autonode_result = self._enable_autonode(cluster_name, cluster_id)
+                cluster_info["autonode_enabled"] = autonode_result
+                if not autonode_result:
+                    self.logging.warning(f"Autonode enablement failed for cluster {cluster_name}, continuing...")
+
+                # Step 2: Wait for OpenshiftEC2NodeClass CRD to be available
+                if autonode_result:
+                    crd_ready = self._wait_for_autonode_crd(cluster_name, cluster_info["kubeconfig"])
+                    if not crd_ready:
+                        self.logging.warning(f"OpenshiftEC2NodeClass CRD not available for cluster {cluster_name}, skipping CR apply...")
+
+                    # Step 3: Apply autonode CRs (NodeClass + NodePool)
+                    if crd_ready:
+                        cr_result = self._apply_autonode_crs(cluster_name, cluster_id, cluster_info["kubeconfig"])
+                        cluster_info["autonode_crs_applied"] = cr_result
+                        if not cr_result:
+                            self.logging.warning(f"Failed to apply autonode CRs for cluster {cluster_name}, continuing...")
             if "extra_machinepool" in platform.environment:
                 extra_machine_pool_start_time = int(datetime.datetime.utcnow().timestamp())
                 self.add_machinepool(cluster_name, cluster_info["metadata"]["cluster_id"], cluster_info["metadata"]["zones"], platform.environment["extra_machinepool"])
@@ -567,6 +655,13 @@ class Hypershift(Rosa):
                                 cluster_info["extra_pool_workers_ready"] = None
                                 cluster_info['status'] = "Ready, missing extra pool workers"
                                 return 1
+            # Tag AWS resources for autonode if requested
+            if platform.environment.get("autonode", False):
+                tag_result = self._tag_aws_resources(cluster_name, cluster_id, region)
+                cluster_info["autonode_resources_tagged"] = tag_result
+                if not tag_result:
+                    self.logging.warning(f"Failed to tag autonode resources for cluster {cluster_name}, continuing...")
+
             cluster_info['status'] = "ready"
             cluster_info["mgmt_cluster_name"] = mgmt_cluster_name
             cluster_info["metadata"]["mgmt_cluster"] = self.get_ocm_cluster_info(mgmt_cluster_name)
@@ -585,6 +680,14 @@ class Hypershift(Rosa):
                 self.es.index_metadata(cluster_info_copy)
                 self.logging.info("Indexing Management cluster stats")
                 self.utils.cluster_load(platform, cluster_name, load="index")
+
+            # Move infra components if extra machinepool (infra) was added
+            if "extra_machinepool" in platform.environment:
+                infra_result = self._move_infra_components(cluster_name, cluster_info["kubeconfig"])
+                cluster_info["infra_components_moved"] = infra_result
+                if not infra_result:
+                    self.logging.warning(f"Failed to move infra components for cluster {cluster_name}, continuing...")
+
             # if cluster_load:
                 #     with all_clusters_installed:
                 #         logging.info('Waiting for all clusters to be installed to start e2e-benchmarking execution on %s' % cluster_name)
@@ -599,6 +702,184 @@ class Hypershift(Rosa):
                 #     logging.info("Saving must-gather file of hosted cluster %s" % cluster_name)
                 #     _get_must_gather(cluster_path, cluster_name)
                 #     _get_mgmt_cluster_must_gather(mgmt_kubeconfig_path, path)
+
+    def _enable_autonode(self, cluster_name, cluster_id):
+        """Enable autonode on a ROSA HCP cluster via rosa edit."""
+        role_arn = self.environment["autonode_iam_role_arn"]
+        self.logging.info(f"[{cluster_name}] Enabling autonode with role ARN: {role_arn}")
+        edit_code, edit_out, edit_err = self.utils.subprocess_exec(
+            f"rosa edit cluster -c {cluster_id} --autonode=enabled --autonode-iam-role-arn={role_arn}",
+            extra_params={"universal_newlines": True}
+        )
+        if edit_code != 0:
+            self.logging.error(f"[{cluster_name}] Failed to enable autonode: {edit_err}")
+            return False
+        self.logging.info(f"[{cluster_name}] Autonode enabled successfully")
+        return True
+
+    def _wait_for_autonode_crd(self, cluster_name, kubeconfig, timeout=30):
+        """Wait for OpenshiftEC2NodeClass CRD to become available (up to timeout minutes)."""
+        self.logging.info(f"[{cluster_name}] Waiting up to {timeout} minutes for OpenshiftEC2NodeClass CRD")
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+        start_time = datetime.datetime.utcnow().timestamp()
+        timeout_secs = timeout * 60
+        while datetime.datetime.utcnow().timestamp() - start_time < timeout_secs:
+            crd_code, crd_out, crd_err = self.utils.subprocess_exec(
+                "oc get crd openshiftec2nodeclasses.karpenter.hypershift.openshift.io",
+                extra_params={"env": myenv, "universal_newlines": True},
+                log_output=False
+            )
+            if crd_code == 0:
+                self.logging.info(f"[{cluster_name}] OpenshiftEC2NodeClass CRD is available")
+                return True
+            elapsed = int(datetime.datetime.utcnow().timestamp() - start_time)
+            self.logging.info(f"[{cluster_name}] CRD not yet available, retrying in 30s ({elapsed}s/{timeout_secs}s)")
+            time.sleep(30)
+        self.logging.error(f"[{cluster_name}] OpenshiftEC2NodeClass CRD not available after {timeout} minutes")
+        return False
+
+    def _tag_aws_resources(self, cluster_name, cluster_id, region):
+        """Tag security group and private subnets with karpenter.sh/discovery."""
+        self.logging.info(f"[{cluster_name}] Tagging resources for autonode discovery")
+
+        # Get the security group ID (retry for up to 30 minutes)
+        self.logging.info(f"[{cluster_name}] Waiting for security group {cluster_id}-default-sg (up to 30 minutes)")
+        security_group_id = None
+        start_time = datetime.datetime.utcnow().timestamp()
+        timeout = 30 * 60  # 30 minutes
+        while datetime.datetime.utcnow().timestamp() - start_time < timeout:
+            sg_code, sg_out, sg_err = self.utils.subprocess_exec(
+                f"aws --region {region} ec2 describe-security-groups --filters Name=group-name,Values={cluster_id}-default-sg --output json",
+                extra_params={"universal_newlines": True}
+            )
+            if sg_code == 0:
+                try:
+                    sg_data = json.loads(sg_out)
+                    if sg_data.get("SecurityGroups"):
+                        security_group_id = sg_data["SecurityGroups"][0]["GroupId"]
+                        self.logging.info(f"[{cluster_name}] Found security group: {security_group_id}")
+                        break
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    pass
+            elapsed = int(datetime.datetime.utcnow().timestamp() - start_time)
+            self.logging.info(f"[{cluster_name}] Security group not found yet, retrying in 30s ({elapsed}s/{timeout}s elapsed)")
+            time.sleep(30)
+
+        if not security_group_id:
+            self.logging.error(f"[{cluster_name}] Security group {cluster_id}-default-sg not found after 30 minutes")
+            return False
+
+        # Get private subnet IDs from the cluster
+        self.logging.info(f"[{cluster_name}] Fetching cluster subnets")
+        desc_code, desc_out, desc_err = self.utils.subprocess_exec(
+            f"rosa describe cluster -c {cluster_name} -o json",
+            extra_params={"universal_newlines": True}
+        )
+        if desc_code != 0:
+            self.logging.error(f"[{cluster_name}] Failed to describe cluster: {desc_err}")
+            return False
+        try:
+            cluster_data = json.loads(desc_out)
+            all_subnets = cluster_data.get("aws", {}).get("subnet_ids", [])
+        except (json.JSONDecodeError, KeyError) as err:
+            self.logging.error(f"[{cluster_name}] Failed to parse cluster description: {err}")
+            return False
+
+        # Filter private subnets using AWS CLI
+        private_subnet_ids = []
+        for subnet_id in all_subnets:
+            sub_code, sub_out, sub_err = self.utils.subprocess_exec(
+                f"aws --region {region} ec2 describe-subnets --subnet-ids {subnet_id} --output json",
+                extra_params={"universal_newlines": True}
+            )
+            if sub_code == 0:
+                try:
+                    subnet_data = json.loads(sub_out)
+                    subnet = subnet_data["Subnets"][0]
+                    if not subnet.get("MapPublicIpOnLaunch", False):
+                        private_subnet_ids.append(subnet_id)
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    pass
+
+        if not private_subnet_ids:
+            self.logging.error(f"[{cluster_name}] No private subnets found")
+            return False
+
+        self.logging.info(f"[{cluster_name}] Found {len(private_subnet_ids)} private subnets: {private_subnet_ids}")
+
+        # Tag security group and private subnets
+        resources = f"{security_group_id} " + " ".join(private_subnet_ids)
+        self.logging.info(f"[{cluster_name}] Tagging resources with karpenter.sh/discovery={cluster_id}")
+        tag_code, tag_out, tag_err = self.utils.subprocess_exec(
+            f'aws --region {region} ec2 create-tags --resources {resources} --tags Key=karpenter.sh/discovery,Value={cluster_id}',
+            extra_params={"universal_newlines": True}
+        )
+        if tag_code != 0:
+            self.logging.error(f"[{cluster_name}] Failed to tag resources: {tag_err}")
+            return False
+
+        self.logging.info(f"[{cluster_name}] Resources tagged successfully")
+        return True
+
+    def _apply_autonode_crs(self, cluster_name, cluster_id, kubeconfig):
+        """Apply OpenshiftEC2NodeClass and NodePool CRs for autonode."""
+        self.logging.info(f"[{cluster_name}] Applying autonode custom resources")
+        myenv = os.environ.copy()
+        myenv["KUBECONFIG"] = kubeconfig
+
+        files_dir = os.path.join(os.path.dirname(__file__), "files")
+        output_dir = os.path.dirname(kubeconfig)
+
+        # Read and render OpenshiftEC2NodeClass template
+        nodeclass_template = os.path.join(files_dir, "autonode-nodeclass.yaml")
+        try:
+            with open(nodeclass_template, "r") as f:
+                nodeclass_cr = f.read().replace("__CLUSTER_ID__", cluster_id)
+        except Exception as err:
+            self.logging.error(f"[{cluster_name}] Failed to read nodeclass template: {err}")
+            return False
+
+        nodeclass_file = os.path.join(output_dir, f"{cluster_name}-nodeclass.yaml")
+        try:
+            with open(nodeclass_file, "w") as f:
+                f.write(nodeclass_cr)
+        except Exception as err:
+            self.logging.error(f"[{cluster_name}] Failed to write nodeclass CR file: {err}")
+            return False
+
+        self.logging.info(f"[{cluster_name}] Applying OpenshiftEC2NodeClass")
+        nc_code, nc_out, nc_err = self.utils.subprocess_exec(
+            f"oc apply -f {nodeclass_file}",
+            extra_params={"env": myenv, "universal_newlines": True}
+        )
+        if nc_code != 0:
+            self.logging.error(f"[{cluster_name}] Failed to apply OpenshiftEC2NodeClass: {nc_err}")
+            return False
+
+        # Read and apply NodePool (no templating needed)
+        nodepool_template = os.path.join(files_dir, "autonode-nodepool.yaml")
+        nodepool_file = os.path.join(output_dir, f"{cluster_name}-nodepool.yaml")
+        try:
+            with open(nodepool_template, "r") as f:
+                nodepool_cr = f.read()
+            with open(nodepool_file, "w") as f:
+                f.write(nodepool_cr)
+        except Exception as err:
+            self.logging.error(f"[{cluster_name}] Failed to read/write nodepool CR file: {err}")
+            return False
+
+        self.logging.info(f"[{cluster_name}] Applying NodePool")
+        np_code, np_out, np_err = self.utils.subprocess_exec(
+            f"oc apply -f {nodepool_file}",
+            extra_params={"env": myenv, "universal_newlines": True}
+        )
+        if np_code != 0:
+            self.logging.error(f"[{cluster_name}] Failed to apply NodePool: {np_err}")
+            return False
+
+        self.logging.info(f"[{cluster_name}] Autonode custom resources applied successfully")
+        return True
 
     def _namespace_wait(self, kubeconfig, cluster_id, cluster_name, type):
         start_time = int(datetime.datetime.utcnow().timestamp())
@@ -693,6 +974,8 @@ class HypershiftArguments(RosaArguments):
         parser.add_argument("--terraform-retry", type=int, default=5, help="Number of retries when executing terraform commands")
         parser.add_argument("--service-cluster", action=EnvDefault, env=environment, envvar="HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER", help="Service Cluster Used to create the Hosted Clusters")
         parser.add_argument("--delete-vpcs", action="store_true", help="Delete all VPC after cleanup")
+        parser.add_argument("--autonode", action="store_true", help="Enable autonode (Karpenter) on clusters after creation")
+        parser.add_argument("--autonode-iam-role-arn", action=EnvDefault, env=environment, envvar="HCP_BURNER_AUTONODE_IAM_ROLE_ARN", default="arn:aws:iam::415909267177:role/ManagedOpenShift-autonode-operator-role", help="IAM Role ARN for autonode")
 
         if config_file:
             config = configparser.ConfigParser()

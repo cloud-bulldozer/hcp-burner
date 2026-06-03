@@ -7,6 +7,14 @@ on:
   pull_request_target:
     branches:
       - main
+    paths:
+      - "**/*.py"
+      - "**/requirements*.txt"
+      - ".github/workflows/**"
+      - "Dockerfile"
+      - "bootstrap.sh"
+      - "utils/**"
+      - "*.ini"
 
 jobs:
   linters:

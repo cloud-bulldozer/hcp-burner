@@ -16,7 +16,12 @@ if __name__ == "__main__":
     ts_start = time.time()
     arguments = Arguments(os.environ)
     logging = Logging(arguments["log_level"], arguments["log_file"])
-    es = Elasticsearch(logging, arguments["es_url"], arguments["es_index"], arguments["es_insecure"], arguments["es_index_retry"]) if arguments["es_url"] else None
+    es = None
+    if arguments["es_url"]:
+        try:
+            es = Elasticsearch(logging, arguments["es_url"], arguments["es_index"], arguments["es_insecure"], arguments["es_index_retry"])
+        except SystemExit:
+            logging.warning("Elasticsearch unavailable, continuing without indexing")
     utils = Utils(logging)
 
     logging.info(f"Detected {arguments['platform']} as platform")

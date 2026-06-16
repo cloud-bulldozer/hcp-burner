@@ -52,6 +52,7 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--enable-workload", action="store_true", help="Execute workload after clusters are installed")
         self.common_parser.add_argument("--workload-repo", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_REPO", default="https://github.com/cloud-bulldozer/e2e-benchmarking.git", type=str, help="Git Repo of the workload")
+        self.common_parser.add_argument("--workload-branch", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_BRANCH", default="master", type=str, help="Branch of the workload repo to clone")
         self.common_parser.add_argument("--workload", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD", help="Workload to execute after clusters are installed", default="cluster-density-ms")
         self.common_parser.add_argument("--workload-script", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT", help="Workload script to execute after clusters are installed", default="run.sh")
         self.common_parser.add_argument("--workload-script-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT_PATH", help="Path to workload script", default="workloads/kube-burner-ocp-wrapper")

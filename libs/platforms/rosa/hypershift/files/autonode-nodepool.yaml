@@ -1,0 +1,22 @@
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: test-pool
+spec:
+  template:
+    metadata:
+      labels:
+        autonode: "true"
+    spec:
+      requirements:
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m6i.xlarge", "m6i.2xlarge", "m6i.4xlarge", "m6i.8xlarge"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: example-nodeclass
+

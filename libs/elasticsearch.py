@@ -10,6 +10,8 @@ import ssl
 from urllib.parse import urlparse, unquote
 import urllib3
 
+OS = None
+ES = None
 try:
     from opensearchpy import OpenSearch as OS
     from opensearchpy.exceptions import NotFoundError

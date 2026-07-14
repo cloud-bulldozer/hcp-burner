@@ -425,8 +425,8 @@ class Utils:
             else:
                 self.logging.info(f"Checking cluster {cluster_name} health using oc adm wait-for-stable-cluster...")
                 health_cmd = "oc wait --for=condition=Available=True co --timeout=60m --all"
-                
-                #health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+
+                # health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
 
                 health_code, health_out, health_err = self.subprocess_exec(
                     health_cmd,

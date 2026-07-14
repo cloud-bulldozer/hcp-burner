@@ -26,6 +26,18 @@ param nodepoolVersion string = '4.20.8'
 @description('The version channel group (e.g., stable, candidate)')
 param versionChannelGroup string = 'stable'
 
+resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview' existing = {
+  name: clusterName
+}
+
+resource nodepool 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters/nodePools@2024-06-10-preview' = {
+  parent: hcp
+  name: nodePoolName
+  location: resourceGroup().location
+  properties: {
+    version: {
+      id: nodepoolVersion
+      channelGroup: versionChannelGroup
     }
     platform: {
       subnetId: hcp.properties.platform.subnetId

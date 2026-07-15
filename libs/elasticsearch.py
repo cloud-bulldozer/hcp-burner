@@ -9,6 +9,7 @@ import sys
 import ssl
 from urllib.parse import urlparse, unquote
 import urllib3
+from libs.sanitize import redact_metadata
 
 OS = None
 ES = None
@@ -101,13 +102,14 @@ class Elasticsearch:
             self.logging.debug(f"Indexing data on {hosts[0]}/{self.index}")
         except Exception:
             self.logging.debug(f"Indexing data on {self.index}")
-        self.logging.debug(metadata)
+        self.logging.debug(f"Indexing metadata keys: {list(metadata.keys())}")
+        self.logging.debug(redact_metadata(metadata))
         try:
             self.elastic.index(index=self.index, body=metadata)
         except Exception as err:
             self.logging.error(err)
             self.logging.error(f"Failed to index data on {self.index}")
-            self.logging.error(metadata)
+            self.logging.error(redact_metadata(metadata))
 
 
 class ElasticArguments:

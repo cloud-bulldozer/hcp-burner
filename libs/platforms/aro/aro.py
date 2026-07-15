@@ -5,6 +5,7 @@ import json
 import configparser
 import argparse
 import subprocess
+import os
 from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from azure.mgmt.resource import ResourceManagementClient, SubscriptionClient
 from azure.core.exceptions import HttpResponseError
@@ -90,13 +91,14 @@ class Aro(Platform):
         # Login to Azure CLI using service principal (required for az ad app create)
         self.logging.info("Logging in to Azure CLI using service principal")
         try:
+            az_env = os.environ.copy()
+            az_env["AZURE_CLIENT_SECRET"] = azure_creds["ClientSecret"]
             az_login_cmd = [
                 "az", "login", "--service-principal",
                 "--username", azure_creds["ClientId"],
-                "--password", azure_creds["ClientSecret"],
                 "--tenant", azure_creds["tenantId"]
             ]
-            az_login_result = subprocess.run(az_login_cmd, capture_output=True, text=True, timeout=60)
+            az_login_result = subprocess.run(az_login_cmd, capture_output=True, text=True, timeout=60, env=az_env)
 
             if az_login_result.returncode != 0:
                 self.logging.warning(f"Azure CLI login failed: {az_login_result.stderr}")

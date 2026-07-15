@@ -11,6 +11,7 @@ import subprocess
 import threading
 from datetime import datetime, timedelta
 from git import Repo
+from libs.sanitize import redact_command, redact_metadata, redact_output
 
 
 class Utils:
@@ -150,7 +151,8 @@ class Utils:
 
         Function call example: exit_code, out, err = common._subprocess_exec("ls -l", extra_params={'cwd': '/tmp', 'universal_newlines': False})
         """
-        self.logging.debug(command)
+        safe_command = redact_command(command)
+        self.logging.debug(safe_command)
         stdout = None
         stderr = None
         try:
@@ -161,19 +163,19 @@ class Utils:
                 process = subprocess.Popen(command.split(), stdout=log_file, stderr=log_file, **extra_params)
             stdout, stderr = process.communicate()
             if process.returncode != 0 and log_output:
-                self.logging.error(f"Failed to execute command: {command}")
-                self.logging.error(stdout if stdout else "")
-                self.logging.error(stderr if stderr else "")
+                self.logging.error(f"Failed to execute command: {safe_command}")
+                self.logging.error(redact_output(stdout if stdout else ""))
+                self.logging.error(redact_output(stderr if stderr else ""))
                 if output_file:
                     with open(output_file, "r") as log_read:
                         content = log_read.read()
-                        self.logging.error(content)
+                        self.logging.error(redact_output(content))
             return process.returncode, stdout, stderr
         except Exception as err:
-            self.logging.error(f"Error executing command: {command}")
+            self.logging.error(f"Error executing command: {safe_command}")
             self.logging.error(str(err))
-            self.logging.error(stdout if stdout else "")
-            self.logging.error(stderr if stderr else "")
+            self.logging.error(redact_output(stdout if stdout else ""))
+            self.logging.error(redact_output(stderr if stderr else ""))
             return -1, None, None
 
     def cleanup_scheduler(self, platform):
@@ -275,7 +277,7 @@ class Utils:
             self.validate_azure_prom_token(platform, phase="workload")
 
         for cluster_name, cluster_info in platform.environment["clusters"].items():
-            self.logging.debug(cluster_info)
+            self.logging.debug(redact_metadata(cluster_info))
             if cluster_info['status'] in ("ready", "installed", "Completed", "Succeeded"):
                 self.logging.info(f"Attempting to start load process on {cluster_name}")
                 try:

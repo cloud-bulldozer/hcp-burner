@@ -13,6 +13,7 @@ from azure.core.exceptions import HttpResponseError
 import requests
 import subprocess
 from kubernetes import client as k8s_client, config as k8s_config
+from libs.sanitize import redact_output, redact_url
 from kubernetes.client.rest import ApiException
 from libs.platforms.aro.aro import Aro
 from libs.platforms.aro.aro import AroArguments
@@ -1144,7 +1145,7 @@ class Hypershift(Aro):
                 self.logging.error(f"[{cluster_name}] Location header not found in admin credential response")
                 raise Exception("Failed to get kubeconfig URL from admin credential response")
 
-            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {kubeconfig_url}...")
+            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {redact_url(kubeconfig_url)}")
 
             # Step 8: Download Kubeconfig with retry (5 minutes, 30 sec interval)
             self.logging.info(f"[{cluster_name}] Step 8: Downloading kubeconfig (retry for up to 5 minutes)")
@@ -1185,7 +1186,6 @@ class Hypershift(Aro):
             if not kubeconfig_content:
                 self.logging.error(f"[{cluster_name}] Failed to download kubeconfig after 5 minutes")
                 self.logging.error(f"[{cluster_name}] Last response status: {kubeconfig_response.status_code}")
-                self.logging.error(f"[{cluster_name}] Last response: {kubeconfig_response.text[:500] if kubeconfig_response.text else 'Empty'}")
                 raise Exception("Failed to download kubeconfig after 5 minutes")
 
             # Save kubeconfig to file
@@ -1216,13 +1216,13 @@ class Hypershift(Aro):
 
         except subprocess.CalledProcessError as err:
             self.logging.error(f"[{cluster_name}] Azure CLI command failed: {err}")
-            self.logging.error(f"[{cluster_name}] stdout: {err.stdout}")
-            self.logging.error(f"[{cluster_name}] stderr: {err.stderr}")
+            self.logging.error(f"[{cluster_name}] stdout: {redact_output(err.stdout)}")
+            self.logging.error(f"[{cluster_name}] stderr: {redact_output(err.stderr)}")
             raise
         except requests.exceptions.RequestException as err:
             self.logging.error(f"[{cluster_name}] HTTP request failed: {err}")
             if hasattr(err, 'response') and err.response is not None:
-                self.logging.error(f"[{cluster_name}] Response: {err.response.text}")
+                self.logging.error(f"[{cluster_name}] Response status: {err.response.status_code}")
             raise
         except Exception as err:
             self.logging.error(f"[{cluster_name}] Unexpected error downloading kubeconfig: {err}")

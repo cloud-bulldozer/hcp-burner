@@ -73,7 +73,7 @@ class Elasticsearch:
                     kwargs["basic_auth"] = auth
                 self.elastic = ES(clean_url, **kwargs)
         else:
-            self.logging.error(f"Failed to initialize with url {url}. It must start with http(s)://")
+            self.logging.error(f"Failed to initialize with url {clean_url}. It must start with http(s)://")
             sys.exit("Exiting...")
 
         self.logging.debug("Testing connection")

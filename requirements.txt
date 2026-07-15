@@ -1,5 +1,6 @@
 openshift
 elasticsearch==7.13.4
+opensearch-py
 gitpython
 packaging
 azure-identity

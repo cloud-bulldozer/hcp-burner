@@ -39,6 +39,7 @@ This document covers the CLI arguments for deploying and managing ARO-HCP cluste
 
 | Argument | Environment Variable | Default | Description |
 |----------|---------------------|---------|-------------|
+| `--swift` | `HCP_BURNER_SWIFT` | `True` | Enable SWIFT networking (pod integration subnet + `2025-12-23-preview` API). Set to `false` for legacy non-SWIFT clusters |
 | `--customer-nsg` | `HCP_BURNER_CUSTOMER_NSG` | `{cluster_name}-nsg` | Customer Network Security Group name |
 | `--customer-vnet-name` | `HCP_BURNER_CUSTOMER_VNET_NAME` | `{cluster_name}-vnet` | Customer Virtual Network name |
 | `--customer-vnet-subnet1` | `HCP_BURNER_CUSTOMER_VNET_SUBNET1` | `{cluster_name}-subnet1` | Customer Virtual Network Subnet name |
@@ -169,8 +170,46 @@ When `--add-aro-hcp-infra true` is set:
 ## Version Handling
 
 The `--aro-version` parameter accepts a full version (e.g., `4.20.8`):
-- **Cluster**: Uses `major.minor` (e.g., `4.20`)
+- **Cluster**: Uses `major.minor` (e.g., `4.20`) for `stable`/`fast` channels; full version for `nightly`/`candidate`
 - **Nodepools**: Uses full version (e.g., `4.20.8`)
+
+## SWIFT vs Non-SWIFT Networking
+
+By default, hcp-burner deploys ARO-HCP clusters with **SWIFT networking** enabled (`--swift true`).
+
+### SWIFT (default)
+
+- Creates an additional pod network subnet (`{cluster_name}-pod-subnet`) in `customer-infra.bicep`
+- Uses `cluster_sw.bicep`, `nodepool_sw.bicep`, `nodepool-infra_sw.bicep`, and `externalauth_sw.bicep`
+- Azure API version: `2025-12-23-preview`
+- Sets `vnetIntegrationSubnetId` on the HostedCluster platform spec
+
+### Non-SWIFT (legacy)
+
+Use this mode when working with clusters created before SWIFT support, or when the management plane does not support the `2025-12-23-preview` API.
+
+```bash
+python hcp-burner.py \
+  --platform aro \
+  --subplatform hypershift \
+  --swift false \
+  --azure-credentials-file /path/to/azure-creds.json \
+  --cluster-name-seed mycluster \
+  --install-clusters
+```
+
+Non-SWIFT behavior:
+
+- Uses `cluster.bicep`, `nodepool.bicep`, `nodepool-infra.bicep`, and `externalauth.bicep`
+- Azure API version: `2024-06-10-preview`
+- No pod integration subnet is created
+- **Important**: Use `--swift false` for delete, metadata, and external-auth operations on existing non-SWIFT clusters. Mismatching the SWIFT flag against the cluster's actual networking mode will cause API errors.
+
+Environment variable equivalent:
+
+```bash
+export HCP_BURNER_SWIFT=false
+```
 
 ## Execution Summary
 

@@ -423,7 +423,7 @@ class Utils:
                 self.logging.info(f"Cluster {cluster_name} monitoring stable for 2 minutes. Proceeding with workload.")
 
             else:
-                self.logging.info(f"Checking cluster {cluster_name} health using oc adm wait-for-stable-cluster...")
+                self.logging.info(f"Checking cluster {cluster_name} health using oc wait --for=condition=Available=True co --timeout=60m --all")
                 health_cmd = "oc wait --for=condition=Available=True co --timeout=60m --all"
 
                 # health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"

@@ -39,7 +39,7 @@ class Arguments(argparse.ArgumentParser):
                                         help="Number of workers for the hosted cluster (min: 3). If list (comma separated), iteration over the list until reach number of clusters")
         self.common_parser.add_argument("--workers-wait-time", type=int, default=60, action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKERS_WAIT_TIME",
                                         help="Waiting time in minutes for the workers to be Ready after cluster installation or machinepool creation . If 0, do not wait. Default: 60 minutes")
-        self.common_parser.add_argument("--wait-for-workers", action="store_true", default=True, help="After cluster will be ready, wait for all workers to be also ready")
+        self.common_parser.add_argument("--wait-for-workers", action="store_true", help="After cluster will be ready, wait for all workers to be also ready")
 
         self.common_parser.add_argument("--cluster-count", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTER_COUNT", type=int, default=1)
         self.common_parser.add_argument("--delay-between-batch", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_BATCH", default=60, type=int,
@@ -58,7 +58,6 @@ class Arguments(argparse.ArgumentParser):
         self.common_parser.add_argument("--workload-executor", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXECUTOR", help="Complete path of binary used to execute the workload", default="/usr/bin/kube-burner")
         self.common_parser.add_argument("--workload-duration", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_DURATION", default="1h", type=str, help="Workload execution duration in minutes")
         self.common_parser.add_argument("--workload-jobs", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_JOBS", type=int, default=10, help="Jobs per worker.Workload will scale this number to the number of workers of the cluster")
-        self.common_parser.add_argument("--workload-extra-flags", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXTRA_FLAGS", default="", type=str, help="Additional flags to pass to kube-burner-ocp (appended to EXTRA_FLAGS)")
 
         self.common_parser.add_argument("--cleanup-clusters", action="store_true", help="Delete all created clusters at the end")
         self.common_parser.add_argument("--wait-before-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_WAIT_BEFORE_CLEANUP", help="Minutes to wait before starting the cleanup process", default=0, type=int)

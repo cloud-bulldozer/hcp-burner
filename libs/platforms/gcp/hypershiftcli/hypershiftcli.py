@@ -261,6 +261,218 @@ class Hypershiftcli(Gcp):
         self.logging.info("RSA keypair and JWKS generated")
         return key_path, jwks_path
 
+    def _normalize_dns_name(self, name):
+        return name.rstrip(".").lower()
+
+    def _find_parent_dns_zone(self, parent_domain, project_id):
+        """Find Cloud DNS managed zone whose dnsName matches parent_domain."""
+        parent_fqdn = self._normalize_dns_name(parent_domain) + "."
+        code, out, _ = self.utils.subprocess_exec(
+            f"gcloud dns managed-zones list --project={project_id} --format=json",
+            extra_params={"universal_newlines": True},
+            log_output=False
+        )
+        if code != 0:
+            self.logging.error(f"Failed to list Cloud DNS managed zones in project {project_id}")
+            return None
+        try:
+            zones = json.loads(out or "[]")
+        except (ValueError, TypeError):
+            self.logging.error("Failed to parse Cloud DNS managed zones list")
+            return None
+        for zone in zones:
+            if self._normalize_dns_name(zone.get("dnsName", "")) + "." == parent_fqdn:
+                return zone.get("name")
+        self.logging.error(
+            f"No Cloud DNS managed zone found for parent domain {parent_fqdn} in project {project_id}"
+        )
+        return None
+
+    def _ensure_cluster_dns(self, cluster_name, parent_domain, project_id):
+        """
+        Create child Cloud DNS zone named after the cluster and NS-delegate it
+        from the parent zone that owns parent_domain.
+
+        Returns child DNS name without trailing dot, e.g. cluster.gcp.example.org
+        """
+        parent_domain = self._normalize_dns_name(parent_domain)
+        child_zone = cluster_name
+        child_dns = f"{cluster_name}.{parent_domain}"
+        child_fqdn = child_dns + "."
+
+        self.logging.info(
+            f"[{cluster_name}] Ensuring Cloud DNS zone {child_zone} for {child_fqdn}"
+        )
+
+        parent_zone = self._find_parent_dns_zone(parent_domain, project_id)
+        if not parent_zone:
+            return None
+
+        # Create child zone if missing
+        describe_code, _, _ = self.utils.subprocess_exec(
+            f"gcloud dns managed-zones describe {child_zone} --project={project_id}",
+            log_output=False
+        )
+        if describe_code != 0:
+            create_code, _, _ = self.utils.subprocess_exec(
+                f"gcloud dns managed-zones create {child_zone} "
+                f"--dns-name={child_fqdn} "
+                f"--description='HyperShift HCP base domain for {cluster_name}' "
+                f"--visibility=public "
+                f"--project={project_id}"
+            )
+            if create_code != 0:
+                self.logging.error(f"[{cluster_name}] Failed to create Cloud DNS zone {child_zone}")
+                return None
+            self.logging.info(f"[{cluster_name}] Created Cloud DNS zone {child_zone}")
+        else:
+            self.logging.info(f"[{cluster_name}] Cloud DNS zone {child_zone} already exists")
+
+        # Child name servers
+        ns_code, ns_out, _ = self.utils.subprocess_exec(
+            f"gcloud dns managed-zones describe {child_zone} --project={project_id} "
+            f"--format=value(nameServers)",
+            extra_params={"universal_newlines": True},
+            log_output=False
+        )
+        if ns_code != 0 or not ns_out:
+            self.logging.error(f"[{cluster_name}] Failed to get name servers for zone {child_zone}")
+            return None
+        name_servers = [ns.strip() for ns in ns_out.replace(";", "\n").split() if ns.strip()]
+        if not name_servers:
+            self.logging.error(f"[{cluster_name}] Empty name server list for zone {child_zone}")
+            return None
+
+        # Add NS delegation in parent if missing
+        existing_code, existing_out, _ = self.utils.subprocess_exec(
+            f"gcloud dns record-sets list --zone={parent_zone} --project={project_id} "
+            f"--name={child_fqdn} --type=NS --format=json",
+            extra_params={"universal_newlines": True},
+            log_output=False
+        )
+        existing = []
+        if existing_code == 0 and existing_out:
+            try:
+                existing = json.loads(existing_out)
+            except (ValueError, TypeError):
+                existing = []
+
+        if existing:
+            self.logging.info(f"[{cluster_name}] NS delegation already present in {parent_zone}")
+        else:
+            self.logging.info(
+                f"[{cluster_name}] Adding NS delegation for {child_fqdn} in parent zone {parent_zone}"
+            )
+            tx_start, _, _ = self.utils.subprocess_exec(
+                f"gcloud dns record-sets transaction start --zone={parent_zone} --project={project_id}"
+            )
+            if tx_start != 0:
+                self.logging.error(f"[{cluster_name}] Failed to start DNS transaction on {parent_zone}")
+                return None
+            ns_args = " ".join(name_servers)
+            tx_add, _, _ = self.utils.subprocess_exec(
+                f"gcloud dns record-sets transaction add {ns_args} "
+                f"--name={child_fqdn} --ttl=300 --type=NS "
+                f"--zone={parent_zone} --project={project_id}"
+            )
+            if tx_add != 0:
+                self.utils.subprocess_exec(
+                    f"gcloud dns record-sets transaction abort --zone={parent_zone} --project={project_id}",
+                    log_output=False
+                )
+                self.logging.error(f"[{cluster_name}] Failed to add NS records for {child_fqdn}")
+                return None
+            tx_exec, _, _ = self.utils.subprocess_exec(
+                f"gcloud dns record-sets transaction execute --zone={parent_zone} --project={project_id}"
+            )
+            if tx_exec != 0:
+                self.logging.error(f"[{cluster_name}] Failed to execute DNS transaction on {parent_zone}")
+                return None
+            self.logging.info(f"[{cluster_name}] NS delegation added for {child_fqdn}")
+
+        return child_dns
+
+    def _cleanup_cluster_dns(self, cluster_name, parent_domain, project_id):
+        """Remove NS delegation from parent zone and delete child Cloud DNS zone."""
+        if not parent_domain:
+            self.logging.warning(f"[{cluster_name}] No base domain configured; skipping DNS cleanup")
+            return
+        parent_domain = self._normalize_dns_name(parent_domain)
+        child_zone = cluster_name
+        child_fqdn = f"{cluster_name}.{parent_domain}."
+
+        parent_zone = self._find_parent_dns_zone(parent_domain, project_id)
+        if parent_zone:
+            list_code, list_out, _ = self.utils.subprocess_exec(
+                f"gcloud dns record-sets list --zone={parent_zone} --project={project_id} "
+                f"--name={child_fqdn} --type=NS --format=json",
+                extra_params={"universal_newlines": True},
+                log_output=False
+            )
+            records = []
+            if list_code == 0 and list_out:
+                try:
+                    records = json.loads(list_out)
+                except (ValueError, TypeError):
+                    records = []
+            if records:
+                rrdatas = records[0].get("rrdatas", [])
+                ttl = records[0].get("ttl", 300)
+                if rrdatas:
+                    self.logging.info(f"[{cluster_name}] Removing NS delegation {child_fqdn} from {parent_zone}")
+                    self.utils.subprocess_exec(
+                        f"gcloud dns record-sets transaction start --zone={parent_zone} --project={project_id}",
+                        log_output=False
+                    )
+                    ns_args = " ".join(rrdatas)
+                    rem_code, _, _ = self.utils.subprocess_exec(
+                        f"gcloud dns record-sets transaction remove {ns_args} "
+                        f"--name={child_fqdn} --ttl={ttl} --type=NS "
+                        f"--zone={parent_zone} --project={project_id}"
+                    )
+                    if rem_code == 0:
+                        self.utils.subprocess_exec(
+                            f"gcloud dns record-sets transaction execute --zone={parent_zone} --project={project_id}"
+                        )
+                    else:
+                        self.utils.subprocess_exec(
+                            f"gcloud dns record-sets transaction abort --zone={parent_zone} --project={project_id}",
+                            log_output=False
+                        )
+
+        describe_code, _, _ = self.utils.subprocess_exec(
+            f"gcloud dns managed-zones describe {child_zone} --project={project_id}",
+            log_output=False
+        )
+        if describe_code == 0:
+            # Delete non-SOA/NS records so the managed zone can be removed
+            rs_code, rs_out, _ = self.utils.subprocess_exec(
+                f"gcloud dns record-sets list --zone={child_zone} --project={project_id} --format=json",
+                extra_params={"universal_newlines": True},
+                log_output=False
+            )
+            record_sets = []
+            if rs_code == 0 and rs_out:
+                try:
+                    record_sets = json.loads(rs_out)
+                except (ValueError, TypeError):
+                    record_sets = []
+            for rs in record_sets:
+                rtype = rs.get("type", "")
+                if rtype in ("SOA", "NS"):
+                    continue
+                name = rs.get("name", "")
+                self.logging.info(f"[{cluster_name}] Deleting DNS record {rtype} {name}")
+                self.utils.subprocess_exec(
+                    f"gcloud dns record-sets delete {name} --type={rtype} "
+                    f"--zone={child_zone} --project={project_id} --quiet",
+                    log_output=False
+                )
+            self.logging.info(f"[{cluster_name}] Deleting Cloud DNS zone {child_zone}")
+            self.utils.subprocess_exec(
+                f"gcloud dns managed-zones delete {child_zone} --project={project_id} --quiet"
+            )
+
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         myenv = os.environ.copy()
@@ -277,8 +489,21 @@ class Hypershiftcli(Gcp):
         region = self.environment["gcp_region"]
         ns = self.environment["hc_namespace"]
         cluster_path = cluster_info["path"]
+        parent_domain = self.environment.get("base_domain", "").strip()
 
         self.logging.info(f"[{cluster_name}] Starting GCP HyperShift cluster creation")
+
+        # Step 0: Create child Cloud DNS zone + NS delegation under parent base-domain
+        self.logging.info(f"[{cluster_name}] Step 0: Creating Cloud DNS zone and parent NS delegation")
+        dns_domain = self._ensure_cluster_dns(cluster_name, parent_domain, project_id)
+        if not dns_domain:
+            cluster_info["status"] = "Not Created"
+            self.utils.increment_counter("clusters_created_failed")
+            return 1
+        cluster_info["parent_dns_domain"] = self._normalize_dns_name(parent_domain)
+        cluster_info["dns_domain"] = dns_domain
+        cluster_info["dns_zone"] = cluster_name
+        self.logging.info(f"[{cluster_name}] Using child DNS domain {dns_domain} for hypershift create")
 
         # Step 1: Generate RSA keypair and JWKS
         self.logging.info(f"[{cluster_name}] Step 1: Generating RSA keypair and JWKS")
@@ -323,8 +548,6 @@ class Hypershiftcli(Gcp):
         pool_id = iam.get("workloadIdentityPool", {}).get("poolId", "")
         provider_id = iam.get("workloadIdentityPool", {}).get("providerId", "")
         sa = iam.get("serviceAccounts", {})
-
-        dns_domain = self.environment.get("base_domain", f"{cluster_name}.example.com")
 
         # Step 5: Create hosted cluster
         self.logging.info(f"[{cluster_name}] Step 5: Creating hosted cluster")
@@ -423,6 +646,7 @@ class Hypershiftcli(Gcp):
         return 0
 
     def delete_cluster(self, platform, cluster_name):
+        # Mirrors https://github.com/Sandeepyadav93/gcp-selfhosted/blob/main/step5_delete_hc_cluster.sh
         super().delete_cluster(platform, cluster_name)
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
@@ -433,26 +657,65 @@ class Hypershiftcli(Gcp):
 
         project_id = self.environment["gcp_project_id"]
         region = self.environment["gcp_region"]
+        ns = self.environment["hc_namespace"]
         cluster_path = cluster_info.get("path", os.path.join(platform.environment["path"], cluster_name))
+        os.makedirs(cluster_path, exist_ok=True)
+        extra = {"env": myenv, "preexec_fn": self.utils.disable_signals}
 
         self.logging.info(f"[{cluster_name}] Deleting GCP HyperShift cluster")
         cluster_start_time = int(datetime.datetime.utcnow().timestamp())
 
+        # Step 1: Destroy hosted cluster (continue on failure, like the bash script)
+        self.logging.info(f"[{cluster_name}] Step 1: Destroying hosted cluster")
         destroy_code, _, _ = self.utils.subprocess_exec(
-            f"hypershift destroy cluster gcp --name {cluster_name} --infra-id={cluster_name} --project={project_id} --region={region}",
-            os.path.join(cluster_path, "cleanup.log"),
-            {"env": myenv, "preexec_fn": self.utils.disable_signals}
+            f"hypershift destroy cluster gcp --name={cluster_name} --namespace={ns}",
+            os.path.join(cluster_path, "cleanup-cluster.log"),
+            extra,
+            log_output=False
         )
+        if destroy_code != 0:
+            self.logging.warning(
+                f"[{cluster_name}] Hosted cluster deletion failed or cluster not found "
+                f"(exit {destroy_code}); continuing with infra and IAM cleanup"
+            )
+
+        # Step 2: Destroy infrastructure
+        self.logging.info(f"[{cluster_name}] Step 2: Destroying infrastructure")
+        infra_code, _, _ = self.utils.subprocess_exec(
+            f"hypershift destroy infra gcp --infra-id={cluster_name} --project-id={project_id} --region={region}",
+            os.path.join(cluster_path, "cleanup-infra.log"),
+            extra
+        )
+
+        # Step 3: Destroy IAM resources
+        self.logging.info(f"[{cluster_name}] Step 3: Destroying IAM resources")
+        iam_code, _, _ = self.utils.subprocess_exec(
+            f"hypershift destroy iam gcp --infra-id={cluster_name} --project-id={project_id}",
+            os.path.join(cluster_path, "cleanup-iam.log"),
+            extra
+        )
+
+        # Step 4: Remove NS delegation and delete child Cloud DNS zone
+        self.logging.info(f"[{cluster_name}] Step 4: Cleaning up Cloud DNS zone and NS delegation")
+        parent_domain = (
+            cluster_info.get("parent_dns_domain")
+            or self.environment.get("base_domain", "")
+        )
+        self._cleanup_cluster_dns(cluster_name, parent_domain, project_id)
 
         cluster_end_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["destroy_duration"] = cluster_end_time - cluster_start_time
 
-        if destroy_code == 0:
+        if infra_code == 0 and iam_code == 0:
             cluster_info["status"] = "deleted"
             self.utils.increment_counter("clusters_deleted_success")
+            self.logging.info(f"[{cluster_name}] Cluster deletion complete")
         else:
             cluster_info["status"] = "not deleted"
             self.utils.increment_counter("clusters_deleted_failed")
+            self.logging.error(
+                f"[{cluster_name}] Cleanup incomplete (infra exit={infra_code}, iam exit={iam_code})"
+            )
 
         with open(os.path.join(cluster_path, "metadata_destroy.json"), "w") as f:
             json.dump(cluster_info, f, indent=2)
@@ -489,7 +752,7 @@ class HypershiftcliArguments(GcpArguments):
         parser.add_argument("--mc-kubeconfig", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_MC_KUBECONFIG", help="Kubeconfig file for the MC (management) cluster")
         parser.add_argument("--release-image", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_RELEASE_IMAGE", help="OpenShift release image")
         parser.add_argument("--pull-secret-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_PULL_SECRET_PATH", help="Path to pull secret file")
-        parser.add_argument("--base-domain", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_BASE_DOMAIN", default="", help="Base DNS domain for the cluster")
+        parser.add_argument("--base-domain", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_BASE_DOMAIN", default="", help="Parent DNS domain (e.g. gcp.hyp.azure.rhperfscale.org). A child zone <cluster-name>.<base-domain> is created and used as hypershift --base-domain/--external-dns-domain")
         parser.add_argument("--hc-namespace", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_HC_NAMESPACE", default="clusters", help="Hosted cluster namespace on MC")
         parser.add_argument("--feature-set", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_FEATURE_SET", default="TechPreviewNoUpgrade", help="Feature set for the cluster")
         parser.add_argument("--endpoint-access", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_ENDPOINT_ACCESS", default="PublicAndPrivate", help="Endpoint access type")
@@ -503,5 +766,5 @@ class HypershiftcliArguments(GcpArguments):
             parser.set_defaults(**defaults)
 
         temp_args, _ = parser.parse_known_args()
-        if not temp_args.mc_kubeconfig or not temp_args.release_image or not temp_args.pull_secret_path:
-            parser.error("hcp-burner.py: error: the following arguments (or equivalent definition) are required: --mc-kubeconfig, --release-image, --pull-secret-path")
+        if not temp_args.mc_kubeconfig or not temp_args.release_image or not temp_args.pull_secret_path or not temp_args.base_domain:
+            parser.error("hcp-burner.py: error: the following arguments (or equivalent definition) are required: --mc-kubeconfig, --release-image, --pull-secret-path, --base-domain")

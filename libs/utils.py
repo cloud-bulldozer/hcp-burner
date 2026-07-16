@@ -379,11 +379,20 @@ class Utils:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
 
         if not os.path.exists(my_path + '/workload'):
-            self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
+            repo = platform.environment['load']['repo']
+            branch = platform.environment['load'].get('branch') or None
+            self.logging.info(
+                f"Cloning workload repo {repo}"
+                + (f" (branch {branch})" if branch else "")
+                + f" on {my_path}/workload"
+            )
             try:
-                Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
+                clone_kwargs = {}
+                if branch:
+                    clone_kwargs["branch"] = branch
+                Repo.clone_from(repo, my_path + '/workload', **clone_kwargs)
             except Exception as err:
-                self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
+                self.logging.error(f"Failed to clone repo {repo}" + (f" branch {branch}" if branch else ""))
                 self.logging.error(err)
                 self.increment_counter("workloads_executed_failed")
                 return 1

@@ -379,32 +379,88 @@ class Hypershiftcli(Gcp):
             self.logging.error(f"[{cluster_name}] Empty name server list for zone {child_zone}")
             return None
 
-        # Add NS delegation in parent if missing
-        existing_code, existing_out, _ = self.utils.subprocess_exec(
-            f"gcloud dns record-sets list --zone={parent_zone} --project={project_id} "
-            f"--name={child_fqdn} --type=NS --format=json",
-            extra_params={"universal_newlines": True},
-            log_output=False
-        )
-        existing = []
-        if existing_code == 0 and existing_out:
-            try:
-                existing = json.loads(existing_out)
-            except (ValueError, TypeError):
-                existing = []
-
-        if existing:
+        # Add NS delegation in parent if missing (retry on 412 SOA precondition races)
+        if self._ns_delegation_exists(parent_zone, child_fqdn, project_id):
             self.logging.info(f"[{cluster_name}] NS delegation already present in {parent_zone}")
         else:
             self.logging.info(
                 f"[{cluster_name}] Adding NS delegation for {child_fqdn} in parent zone {parent_zone}"
             )
+            if not self._add_ns_delegation(
+                cluster_name, parent_zone, child_fqdn, name_servers, project_id
+            ):
+                return None
+            self.logging.info(f"[{cluster_name}] NS delegation added for {child_fqdn}")
+
+        return child_dns
+
+    def _dns_tx_file(self, zone, cluster_name):
+        """Per-cluster transaction file so parallel creates do not share transaction.yaml."""
+        return os.path.join(
+            "/tmp", f"hcp-burner-dns-tx-{zone}-{cluster_name}.yaml"
+        )
+
+    def _abort_dns_transaction(self, zone, project_id, tx_file):
+        self.utils.subprocess_exec(
+            [
+                "gcloud", "dns", "record-sets", "transaction", "abort",
+                f"--zone={zone}",
+                f"--project={project_id}",
+                f"--transaction-file={tx_file}",
+            ],
+            log_output=False,
+        )
+        try:
+            os.remove(tx_file)
+        except OSError:
+            pass
+
+    def _ns_delegation_exists(self, parent_zone, child_fqdn, project_id):
+        code, out, _ = self.utils.subprocess_exec(
+            f"gcloud dns record-sets list --zone={parent_zone} --project={project_id} "
+            f"--name={child_fqdn} --type=NS --format=json",
+            extra_params={"universal_newlines": True},
+            log_output=False,
+        )
+        if code != 0 or not out:
+            return False
+        try:
+            existing = json.loads(out)
+        except (ValueError, TypeError):
+            return False
+        return bool(existing)
+
+    def _add_ns_delegation(
+        self, cluster_name, parent_zone, child_fqdn, name_servers, project_id, max_retries=5
+    ):
+        """Add NS records with retries for concurrent SOA/etag 412 precondition failures."""
+        tx_file = self._dns_tx_file(parent_zone, cluster_name)
+        for attempt in range(1, max_retries + 1):
+            if self._ns_delegation_exists(parent_zone, child_fqdn, project_id):
+                self.logging.info(
+                    f"[{cluster_name}] NS delegation already present after attempt {attempt}"
+                )
+                return True
+
+            self._abort_dns_transaction(parent_zone, project_id, tx_file)
+
             tx_start, _, _ = self.utils.subprocess_exec(
-                f"gcloud dns record-sets transaction start --zone={parent_zone} --project={project_id}"
+                [
+                    "gcloud", "dns", "record-sets", "transaction", "start",
+                    f"--zone={parent_zone}",
+                    f"--project={project_id}",
+                    f"--transaction-file={tx_file}",
+                ],
+                log_output=False,
             )
             if tx_start != 0:
-                self.logging.error(f"[{cluster_name}] Failed to start DNS transaction on {parent_zone}")
-                return None
+                self.logging.warning(
+                    f"[{cluster_name}] DNS transaction start failed "
+                    f"(attempt {attempt}/{max_retries})"
+                )
+                time.sleep(min(2 ** attempt, 16))
+                continue
+
             tx_add, _, _ = self.utils.subprocess_exec(
                 [
                     "gcloud", "dns", "record-sets", "transaction", "add",
@@ -414,24 +470,128 @@ class Hypershiftcli(Gcp):
                     "--type=NS",
                     f"--zone={parent_zone}",
                     f"--project={project_id}",
-                ]
+                    f"--transaction-file={tx_file}",
+                ],
+                log_output=False,
             )
             if tx_add != 0:
-                self.utils.subprocess_exec(
-                    f"gcloud dns record-sets transaction abort --zone={parent_zone} --project={project_id}",
-                    log_output=False
+                self._abort_dns_transaction(parent_zone, project_id, tx_file)
+                self.logging.warning(
+                    f"[{cluster_name}] DNS transaction add failed "
+                    f"(attempt {attempt}/{max_retries})"
                 )
-                self.logging.error(f"[{cluster_name}] Failed to add NS records for {child_fqdn}")
-                return None
-            tx_exec, _, _ = self.utils.subprocess_exec(
-                f"gcloud dns record-sets transaction execute --zone={parent_zone} --project={project_id}"
-            )
-            if tx_exec != 0:
-                self.logging.error(f"[{cluster_name}] Failed to execute DNS transaction on {parent_zone}")
-                return None
-            self.logging.info(f"[{cluster_name}] NS delegation added for {child_fqdn}")
+                time.sleep(min(2 ** attempt, 16))
+                continue
 
-        return child_dns
+            tx_exec, _, _ = self.utils.subprocess_exec(
+                [
+                    "gcloud", "dns", "record-sets", "transaction", "execute",
+                    f"--zone={parent_zone}",
+                    f"--project={project_id}",
+                    f"--transaction-file={tx_file}",
+                ],
+                log_output=False,
+            )
+            if tx_exec == 0:
+                try:
+                    os.remove(tx_file)
+                except OSError:
+                    pass
+                return True
+
+            # 412 Precondition / concurrent write: abort, re-check, retry
+            self._abort_dns_transaction(parent_zone, project_id, tx_file)
+            if self._ns_delegation_exists(parent_zone, child_fqdn, project_id):
+                self.logging.info(
+                    f"[{cluster_name}] NS delegation present after failed execute "
+                    f"(likely concurrent writer succeeded)"
+                )
+                return True
+            self.logging.warning(
+                f"[{cluster_name}] DNS transaction execute failed "
+                f"(attempt {attempt}/{max_retries}); retrying after backoff"
+            )
+            time.sleep(min(2 ** attempt, 16))
+
+        self.logging.error(
+            f"[{cluster_name}] Failed to add NS delegation for {child_fqdn} "
+            f"after {max_retries} attempts"
+        )
+        return False
+
+    def _remove_ns_delegation(
+        self, cluster_name, parent_zone, child_fqdn, rrdatas, ttl, project_id, max_retries=5
+    ):
+        """Remove NS records with retries for concurrent SOA/etag 412 precondition failures."""
+        tx_file = self._dns_tx_file(parent_zone, f"{cluster_name}-del")
+        for attempt in range(1, max_retries + 1):
+            if not self._ns_delegation_exists(parent_zone, child_fqdn, project_id):
+                self.logging.info(f"[{cluster_name}] NS delegation already removed")
+                return True
+
+            self._abort_dns_transaction(parent_zone, project_id, tx_file)
+
+            tx_start, _, _ = self.utils.subprocess_exec(
+                [
+                    "gcloud", "dns", "record-sets", "transaction", "start",
+                    f"--zone={parent_zone}",
+                    f"--project={project_id}",
+                    f"--transaction-file={tx_file}",
+                ],
+                log_output=False,
+            )
+            if tx_start != 0:
+                time.sleep(min(2 ** attempt, 16))
+                continue
+
+            rem_code, _, _ = self.utils.subprocess_exec(
+                [
+                    "gcloud", "dns", "record-sets", "transaction", "remove",
+                    *rrdatas,
+                    f"--name={child_fqdn}",
+                    f"--ttl={ttl}",
+                    "--type=NS",
+                    f"--zone={parent_zone}",
+                    f"--project={project_id}",
+                    f"--transaction-file={tx_file}",
+                ],
+                log_output=False,
+            )
+            if rem_code != 0:
+                self._abort_dns_transaction(parent_zone, project_id, tx_file)
+                time.sleep(min(2 ** attempt, 16))
+                continue
+
+            tx_exec, _, _ = self.utils.subprocess_exec(
+                [
+                    "gcloud", "dns", "record-sets", "transaction", "execute",
+                    f"--zone={parent_zone}",
+                    f"--project={project_id}",
+                    f"--transaction-file={tx_file}",
+                ],
+                log_output=False,
+            )
+            if tx_exec == 0:
+                try:
+                    os.remove(tx_file)
+                except OSError:
+                    pass
+                return True
+
+            self._abort_dns_transaction(parent_zone, project_id, tx_file)
+            if not self._ns_delegation_exists(parent_zone, child_fqdn, project_id):
+                return True
+            self.logging.warning(
+                f"[{cluster_name}] DNS NS remove execute failed "
+                f"(attempt {attempt}/{max_retries}); retrying"
+            )
+            time.sleep(min(2 ** attempt, 16))
+
+        self.logging.error(
+            f"[{cluster_name}] Failed to remove NS delegation for {child_fqdn} "
+            f"after {max_retries} attempts"
+        )
+        return False
 
     def _cleanup_cluster_dns(self, cluster_name, parent_domain, project_id):
         """Remove NS delegation from parent zone and delete child Cloud DNS zone."""
@@ -460,31 +620,12 @@ class Hypershiftcli(Gcp):
                 rrdatas = records[0].get("rrdatas", [])
                 ttl = records[0].get("ttl", 300)
                 if rrdatas:
-                    self.logging.info(f"[{cluster_name}] Removing NS delegation {child_fqdn} from {parent_zone}")
-                    self.utils.subprocess_exec(
-                        f"gcloud dns record-sets transaction start --zone={parent_zone} --project={project_id}",
-                        log_output=False
+                    self.logging.info(
+                        f"[{cluster_name}] Removing NS delegation {child_fqdn} from {parent_zone}"
                     )
-                    rem_code, _, _ = self.utils.subprocess_exec(
-                        [
-                            "gcloud", "dns", "record-sets", "transaction", "remove",
-                            *rrdatas,
-                            f"--name={child_fqdn}",
-                            f"--ttl={ttl}",
-                            "--type=NS",
-                            f"--zone={parent_zone}",
-                            f"--project={project_id}",
-                        ]
+                    self._remove_ns_delegation(
+                        cluster_name, parent_zone, child_fqdn, rrdatas, ttl, project_id
                     )
-                    if rem_code == 0:
-                        self.utils.subprocess_exec(
-                            f"gcloud dns record-sets transaction execute --zone={parent_zone} --project={project_id}"
-                        )
-                    else:
-                        self.utils.subprocess_exec(
-                            f"gcloud dns record-sets transaction abort --zone={parent_zone} --project={project_id}",
-                            log_output=False
-                        )
 
         describe_code, _, _ = self.utils.subprocess_exec(
             f"gcloud dns managed-zones describe {child_zone} --project={project_id}",

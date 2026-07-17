@@ -224,6 +224,39 @@ class Hypershiftcli(Gcp):
         self.logging.error(f"[{cluster_name}] Timeout waiting for workers")
         return 0
 
+    def _load_hypershift_json_output(self, path, required_keys):
+        """Parse hypershift create iam/infra output.
+
+        hypershift writes NDJSON logs and a pretty-printed result object to the
+        same stream; pick the last JSON object that contains required_keys.
+        """
+        with open(path, "r") as f:
+            content = f.read()
+        decoder = json.JSONDecoder()
+        idx = 0
+        match = None
+        while idx < len(content):
+            while idx < len(content) and content[idx].isspace():
+                idx += 1
+            if idx >= len(content):
+                break
+            try:
+                obj, end = decoder.raw_decode(content, idx)
+            except json.JSONDecodeError:
+                next_brace = content.find("{", idx + 1)
+                if next_brace < 0:
+                    break
+                idx = next_brace
+                continue
+            idx = end
+            if isinstance(obj, dict) and all(k in obj for k in required_keys):
+                match = obj
+        if match is None:
+            raise ValueError(
+                f"No JSON object with keys {required_keys} found in {path}"
+            )
+        return match
+
     def _generate_keys_and_jwks(self, cluster_path):
         """Generate RSA keypair and JWKS file for OIDC provider."""
         key_path = os.path.join(cluster_path, "sa-signer.key")
@@ -314,12 +347,15 @@ class Hypershiftcli(Gcp):
             log_output=False
         )
         if describe_code != 0:
+            # Pass as a list so description spaces are not broken by command.split()
             create_code, _, _ = self.utils.subprocess_exec(
-                f"gcloud dns managed-zones create {child_zone} "
-                f"--dns-name={child_fqdn} "
-                f"--description='HyperShift HCP base domain for {cluster_name}' "
-                f"--visibility=public "
-                f"--project={project_id}"
+                [
+                    "gcloud", "dns", "managed-zones", "create", child_zone,
+                    f"--dns-name={child_fqdn}",
+                    f"--description=HyperShift HCP base domain for {cluster_name}",
+                    "--visibility=public",
+                    f"--project={project_id}",
+                ]
             )
             if create_code != 0:
                 self.logging.error(f"[{cluster_name}] Failed to create Cloud DNS zone {child_zone}")
@@ -369,11 +405,16 @@ class Hypershiftcli(Gcp):
             if tx_start != 0:
                 self.logging.error(f"[{cluster_name}] Failed to start DNS transaction on {parent_zone}")
                 return None
-            ns_args = " ".join(name_servers)
             tx_add, _, _ = self.utils.subprocess_exec(
-                f"gcloud dns record-sets transaction add {ns_args} "
-                f"--name={child_fqdn} --ttl=300 --type=NS "
-                f"--zone={parent_zone} --project={project_id}"
+                [
+                    "gcloud", "dns", "record-sets", "transaction", "add",
+                    *name_servers,
+                    f"--name={child_fqdn}",
+                    "--ttl=300",
+                    "--type=NS",
+                    f"--zone={parent_zone}",
+                    f"--project={project_id}",
+                ]
             )
             if tx_add != 0:
                 self.utils.subprocess_exec(
@@ -424,11 +465,16 @@ class Hypershiftcli(Gcp):
                         f"gcloud dns record-sets transaction start --zone={parent_zone} --project={project_id}",
                         log_output=False
                     )
-                    ns_args = " ".join(rrdatas)
                     rem_code, _, _ = self.utils.subprocess_exec(
-                        f"gcloud dns record-sets transaction remove {ns_args} "
-                        f"--name={child_fqdn} --ttl={ttl} --type=NS "
-                        f"--zone={parent_zone} --project={project_id}"
+                        [
+                            "gcloud", "dns", "record-sets", "transaction", "remove",
+                            *rrdatas,
+                            f"--name={child_fqdn}",
+                            f"--ttl={ttl}",
+                            "--type=NS",
+                            f"--zone={parent_zone}",
+                            f"--project={project_id}",
+                        ]
                     )
                     if rem_code == 0:
                         self.utils.subprocess_exec(
@@ -475,8 +521,7 @@ class Hypershiftcli(Gcp):
 
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
-        myenv = os.environ.copy()
-        myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
+        myenv = self.gcp_process_env({"KUBECONFIG": self.environment["mc_kubeconfig"]})
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
         cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
@@ -509,12 +554,16 @@ class Hypershiftcli(Gcp):
         self.logging.info(f"[{cluster_name}] Step 1: Generating RSA keypair and JWKS")
         key_path, jwks_path = self._generate_keys_and_jwks(cluster_path)
 
+        # Force SA ADC on every GCP API call (do not fall back to user ADC).
+        gcp_extra = {"env": myenv, "preexec_fn": self.utils.disable_signals}
+
         # Step 2: Create IAM resources
         self.logging.info(f"[{cluster_name}] Step 2: Creating IAM resources")
         iam_output = os.path.join(cluster_path, "iam-output.json")
         iam_code, _, _ = self.utils.subprocess_exec(
             f"hypershift create iam gcp --infra-id={cluster_name} --project-id={project_id} --oidc-jwks-file={jwks_path}",
-            iam_output
+            iam_output,
+            gcp_extra,
         )
         if iam_code != 0:
             self.logging.error(f"[{cluster_name}] Failed to create IAM resources")
@@ -527,7 +576,8 @@ class Hypershiftcli(Gcp):
         infra_output = os.path.join(cluster_path, "infra-output.json")
         infra_code, _, _ = self.utils.subprocess_exec(
             f"hypershift create infra gcp --infra-id={cluster_name} --project-id={project_id} --region={region}",
-            infra_output
+            infra_output,
+            gcp_extra,
         )
         if infra_code != 0:
             self.logging.error(f"[{cluster_name}] Failed to create infrastructure")
@@ -537,10 +587,18 @@ class Hypershiftcli(Gcp):
 
         # Step 4: Parse IAM and infra outputs
         self.logging.info(f"[{cluster_name}] Step 4: Parsing IAM and infra outputs")
-        with open(iam_output, 'r') as f:
-            iam = json.load(f)
-        with open(infra_output, 'r') as f:
-            infra = json.load(f)
+        try:
+            iam = self._load_hypershift_json_output(
+                iam_output, ("projectNumber", "workloadIdentityPool", "serviceAccounts")
+            )
+            infra = self._load_hypershift_json_output(
+                infra_output, ("networkName", "subnetName")
+            )
+        except (ValueError, OSError) as err:
+            self.logging.error(f"[{cluster_name}] Failed to parse IAM/infra output: {err}")
+            cluster_info["status"] = "Not Created"
+            self.utils.increment_counter("clusters_created_failed")
+            return 1
 
         network_name = infra.get("networkName", "")
         subnet_name = infra.get("subnetName", "")
@@ -636,11 +694,21 @@ class Hypershiftcli(Gcp):
             json.dump(cluster_info, f, indent=2)
 
         if self.es is not None:
+            self.logging.info(f"[{cluster_name}] Indexing install metadata to Elasticsearch")
             self.es.index_metadata(cluster_info)
             os.environ["START_TIME"] = str(cluster_start_time)
             os.environ["END_TIME"] = str(cluster_end_time)
+            self.logging.info(
+                f"[{cluster_name}] Waiting 120s then indexing cluster metrics via e2e-benchmarking"
+            )
             time.sleep(120)
             self.utils.cluster_load(platform, cluster_name, load="index")
+        else:
+            self.logging.warning(
+                f"[{cluster_name}] ES is not configured (pass --es-url / HCP_BURNER_ES_URL); "
+                f"skipping install metadata and e2e-benchmarking index. "
+                f"Timings saved locally in {cluster_path}/metadata_install.json"
+            )
 
         self.utils.increment_counter("clusters_created_success")
         return 0
@@ -648,8 +716,7 @@ class Hypershiftcli(Gcp):
     def delete_cluster(self, platform, cluster_name):
         # Mirrors https://github.com/Sandeepyadav93/gcp-selfhosted/blob/main/step5_delete_hc_cluster.sh
         super().delete_cluster(platform, cluster_name)
-        myenv = os.environ.copy()
-        myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
+        myenv = self.gcp_process_env({"KUBECONFIG": self.environment["mc_kubeconfig"]})
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
         cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
@@ -752,7 +819,7 @@ class HypershiftcliArguments(GcpArguments):
         parser.add_argument("--mc-kubeconfig", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_MC_KUBECONFIG", help="Kubeconfig file for the MC (management) cluster")
         parser.add_argument("--release-image", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_RELEASE_IMAGE", help="OpenShift release image")
         parser.add_argument("--pull-secret-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_PULL_SECRET_PATH", help="Path to pull secret file")
-        parser.add_argument("--base-domain", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_BASE_DOMAIN", default="", help="Parent DNS domain (e.g. gcp.hyp.azure.rhperfscale.org). A child zone <cluster-name>.<base-domain> is created and used as hypershift --base-domain/--external-dns-domain")
+        parser.add_argument("--base-domain", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_BASE_DOMAIN", default="", help="Parent DNS domain (e.g. gcp.hyp.azure.rhperfscale.org). A child zone <cluster-name>.<base-domain> is always created and NS-delegated for hypershift --base-domain/--external-dns-domain")
         parser.add_argument("--hc-namespace", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_HC_NAMESPACE", default="clusters", help="Hosted cluster namespace on MC")
         parser.add_argument("--feature-set", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_FEATURE_SET", default="TechPreviewNoUpgrade", help="Feature set for the cluster")
         parser.add_argument("--endpoint-access", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_ENDPOINT_ACCESS", default="PublicAndPrivate", help="Endpoint access type")

@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import sys
-import json
 import configparser
 import argparse
+from libs.gcp import GCP
 from libs.platforms.platform import Platform
 from libs.platforms.platform import PlatformArguments
 
@@ -12,39 +12,42 @@ class Gcp(Platform):
     def __init__(self, arguments, logging, utils, es):
         super().__init__(arguments, logging, utils, es)
 
+        self.gcp = GCP(logging, arguments["gcp_credentials_file"])
+        self.gcp.set_gcp_envvars(arguments["gcp_project_id"], arguments["gcp_region"])
+        self.environment["gcp"] = self.gcp.set_gcp_environment(
+            arguments["gcp_project_id"], arguments["gcp_region"]
+        )
         self.environment["gcp_project_id"] = arguments["gcp_project_id"]
         self.environment["gcp_region"] = arguments["gcp_region"]
-        self.environment["gcp_credentials_file"] = arguments["gcp_credentials_file"]
+        self.environment["gcp_credentials_file"] = self.environment["gcp"]["credentials_file"]
         self.environment["commands"].append("gcloud")
 
     def initialize(self):
         super().initialize()
 
+        project_id = self.environment["gcp_project_id"]
         creds_file = self.environment["gcp_credentials_file"]
-        self.logging.info(f"Verifying GCP credentials file {creds_file}...")
-        with open(creds_file, 'r') as f:
-            creds = json.load(f)
-        for key in ["project_id", "client_email", "private_key"]:
-            if key not in creds:
-                self.logging.error(f"Missing {key} in GCP credentials file {creds_file}")
-                sys.exit("Exiting...")
-        self.logging.info(f"GCP credentials file {creds_file} verified")
+        client_email = self.environment["gcp"].get("client_email", "")
 
         self.logging.info("Authenticating with GCP using service account")
         auth_code, _, _ = self.utils.subprocess_exec(
-            f"gcloud auth activate-service-account {creds['client_email']} --key-file={creds_file}"
+            f"gcloud auth activate-service-account {client_email} --key-file={creds_file}"
         )
         if auth_code != 0:
             self.logging.error("Failed to authenticate with GCP")
             sys.exit("Exiting...")
 
         set_code, _, _ = self.utils.subprocess_exec(
-            f"gcloud config set project {self.environment['gcp_project_id']}"
+            f"gcloud config set project {project_id}"
         )
         if set_code != 0:
-            self.logging.error(f"Failed to set GCP project {self.environment['gcp_project_id']}")
+            self.logging.error(f"Failed to set GCP project {project_id}")
             sys.exit("Exiting...")
-        self.logging.info(f"GCP project set to {self.environment['gcp_project_id']}")
+        self.logging.info(f"GCP project set to {project_id}")
+
+    def gcp_process_env(self, extra=None):
+        """Env for GCP API subprocesses (hypershift create/destroy iam|infra)."""
+        return self.gcp.process_env(self.environment["gcp_project_id"], extra)
 
     def platform_cleanup(self):
         super().platform_cleanup()

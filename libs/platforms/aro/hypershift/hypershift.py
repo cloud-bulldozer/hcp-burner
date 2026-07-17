@@ -100,7 +100,7 @@ class Hypershift(Aro):
             customer_vnet_name: Virtual Network name
             customer_vnet_subnet1: Virtual Network Subnet 1 name
             cluster_path: Path to cluster directory for compiled templates
-            swift: Enable SWIFT networking with additional pod network subnet
+            swift: Enable SWIFT networking with additional VNet integration subnet
 
         Returns:
             tuple: (key_vault_name, customer_rg_name) on success
@@ -135,12 +135,16 @@ class Hypershift(Aro):
             "swift": {"value": swift}
         }
         if swift:
-            pod_network_subnet_name = f"{cluster_name}-pod-subnet"
-            infra_parameters["customerVnetPodNetworkSubnetName"] = {"value": pod_network_subnet_name}
-            self.logging.info(f"[{cluster_name}] SWIFT enabled, will create additional pod network subnet: {pod_network_subnet_name}")
+            vnet_integration_subnet_name = f"{cluster_name}-vnet-integration-subnet"
+            infra_parameters["customerVirtualNetworkIntegrationSubnetName"] = {
+                "value": vnet_integration_subnet_name
+            }
+            self.logging.info(
+                f"[{cluster_name}] SWIFT enabled, will create VNet integration subnet: "
+                f"{vnet_integration_subnet_name}"
+            )
 
         # Compile Bicep template to JSON
-        import subprocess
         output_file = os.path.join(cluster_path, "customer-infra.json")
         compile_cmd = f"az bicep build --file {shlex.quote(bicep_template_path)} --outfile {shlex.quote(output_file)}"
         compile_result = subprocess.run(compile_cmd, shell=True, capture_output=True, text=True)
@@ -413,7 +417,9 @@ class Hypershift(Aro):
                 "versionChannelGroup": {"value": aro_version_channel}
             }
             if swift:
-                cluster_parameters["vnetIntegrationSubnetName"] = {"value": f"{cluster_name}-pod-subnet"}
+                cluster_parameters["vnetIntegrationSubnetName"] = {
+                    "value": f"{cluster_name}-vnet-integration-subnet"
+                }
                 self.logging.info(f"[{cluster_name}] SWIFT enabled, using cluster_sw.bicep with 2025-12-23-preview API")
 
             cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
@@ -1847,7 +1853,7 @@ class HypershiftArguments(AroArguments):
         parser.add_argument("--azure-ad-group-name", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_AD_GROUP_NAME", default="aro-hcp-perfscale", help="Azure AD group name to grant cluster-admin access (default: aro-hcp-perfscale)")
         parser.add_argument("--issuer-url", action=EnvDefault, env=environment, envvar="HCP_BURNER_ISSUER_URL", default=None, help="OIDC issuer URL for external auth (default: https://login.microsoftonline.com/{tenant_id}/v2.0)")
         parser.add_argument("--azure-prom-token-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_PROM_TOKEN_FILE", help="Path to AZURE_PROM_TOKEN file for scraping metrics from MC (Management Cluster)")
-        parser.add_argument("--swift", action=EnvDefault, env=environment, envvar="HCP_BURNER_SWIFT", type=str, default="True", help="Enable SWIFT networking by creating an additional pod network subnet (default: True). Accepts: true/false, 1/0, yes/no")
+        parser.add_argument("--swift", action=EnvDefault, env=environment, envvar="HCP_BURNER_SWIFT", type=str, default="True", help="Enable SWIFT networking by creating a VNet integration subnet (default: True). Accepts: true/false, 1/0, yes/no")
 
         if config_file:
             config = configparser.ConfigParser()

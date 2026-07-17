@@ -7,11 +7,11 @@ param customerVnetName string
 @description('Subnet Name')
 param customerVnetSubnetName string
 
-@description('Enable SWIFT networking with additional pod network subnet')
+@description('Enable SWIFT networking with additional VNet integration subnet')
 param swift bool = true
 
-@description('Pod Network Subnet Name (used when SWIFT is enabled)')
-param customerVnetPodNetworkSubnetName string = ''
+@description('Virtual Network Integration Subnet Name (used when SWIFT is enabled)')
+param customerVirtualNetworkIntegrationSubnetName string = ''
 
 var randomSuffix = toLower(uniqueString(resourceGroup().id))
 
@@ -23,7 +23,7 @@ var customerKeyVaultName string = 'cust-kv-${randomSuffix}'
 
 var addressPrefix = '10.0.0.0/16'
 var subnetPrefix = '10.0.0.0/23'
-var podNetworkSubnetPrefix = '10.0.2.0/23'
+var virtualNetworkIntegrationSubnetPrefix = '10.0.2.0/23'
 
 resource customerNsg 'Microsoft.Network/networkSecurityGroups@2023-05-01' = {
   name: customerNsgName
@@ -47,9 +47,9 @@ var baseSubnets = [
 
 var swiftSubnets = swift ? [
   {
-    name: customerVnetPodNetworkSubnetName
+    name: customerVirtualNetworkIntegrationSubnetName
     properties: {
-      addressPrefix: podNetworkSubnetPrefix
+      addressPrefix: virtualNetworkIntegrationSubnetPrefix
       networkSecurityGroup: {
         id: customerNsg.id
       }

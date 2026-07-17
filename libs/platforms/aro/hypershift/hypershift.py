@@ -8,7 +8,7 @@ import configparser
 import argparse
 import shlex
 from copy import deepcopy
-from azure.mgmt.resource.resources.v2022_09_01.models import DeploymentMode, Deployment, DeploymentProperties
+from azure.mgmt.resource.resources.models import DeploymentMode, Deployment, DeploymentProperties
 from azure.core.exceptions import HttpResponseError
 import requests
 import subprocess
@@ -110,7 +110,7 @@ class Hypershift(Aro):
         """
         # Step 1: Create Resource Group
         self.logging.info(f"[{cluster_name}] Creating resource group {customer_rg_name}")
-        from azure.mgmt.resource.resources.v2022_09_01.models import ResourceGroup
+        from azure.mgmt.resource.resources.models import ResourceGroup
         resource_group_params = ResourceGroup(location=location, tags={"TicketId": ticket_id})
 
         try:

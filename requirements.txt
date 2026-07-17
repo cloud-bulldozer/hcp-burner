@@ -4,6 +4,6 @@ opensearch-py
 gitpython
 packaging
 azure-identity
-azure-mgmt-resource>=17.0.0
+azure-mgmt-resource>=23.0.0
 azure-core
 requests

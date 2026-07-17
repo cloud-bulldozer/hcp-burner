@@ -184,8 +184,16 @@ class Utils:
             time.sleep(platform.environment["wait_before_cleanup"] * 60)
         self.logging.info(f"Attempting to start cleanup process of {len(platform.environment['clusters'])} clusters waiting {platform.environment['delay_between_cleanup']} seconds between each deletion")
         delete_cluster_thread_list = []
+        skip_statuses = ("metadata_not_found", "Not Created", "thread_failed")
         for cluster_name, cluster_info in platform.environment["clusters"].items():
-            self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {cluster_info['status']}")
+            status = cluster_info.get("status")
+            if status in skip_statuses or status is None:
+                self.logging.warning(
+                    f"[{cluster_name}] Skipping delete; cluster not found or not eligible "
+                    f"(status: {status})"
+                )
+                continue
+            self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {status}")
             try:
                 thread = threading.Thread(
                     target=platform.delete_cluster, args=(platform, cluster_name)
@@ -193,6 +201,7 @@ class Utils:
             except Exception as err:
                 self.logging.error("Thread creation failed")
                 self.logging.error(err)
+                continue
             delete_cluster_thread_list.append(thread)
             thread.start()
             cluster_info["status"] = "deleting"
@@ -206,8 +215,7 @@ class Utils:
                 time.sleep(platform.environment["delay_between_cleanup"])
         return delete_cluster_thread_list
 
-    # To form the cluster_info dict for cleanup funtions
-    # It will be called only when --cleanup-clusters without --install-clusters
+    # To form the cluster_info dict for cleanup/workload when --install-clusters is not used
     def get_cluster_info(self, platform):
         loop_counter = 0
         while loop_counter < platform.environment["cluster_count"]:
@@ -216,11 +224,13 @@ class Utils:
             platform.environment["clusters"][cluster_name] = {}
             platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(platform, cluster_name)
 
-            # Check if metadata retrieval failed (status not found or metadata_not_found)
+            # Missing clusters: drop from the set so workload/delete do not attempt them
             metadata_status = platform.environment["clusters"][cluster_name]["metadata"].get("status")
             if metadata_status is None or metadata_status == "metadata_not_found":
-                self.logging.warning(f"[{cluster_name}] Metadata not found after all retries, skipping this cluster")
-                platform.environment["clusters"][cluster_name]["status"] = "metadata_not_found"
+                self.logging.warning(
+                    f"[{cluster_name}] Cluster not found; ignoring for workload/delete and continuing"
+                )
+                platform.environment["clusters"].pop(cluster_name, None)
                 continue
 
             platform.environment["clusters"][cluster_name]["status"] = metadata_status

@@ -830,6 +830,14 @@ class Hypershift(Aro):
             self.utils.increment_counter("clusters_deleted_success")
             return 0
         except HttpResponseError as err:
+            if getattr(err, "status_code", None) == 404:
+                self.logging.warning(
+                    f"[{cluster_name}] Resource group {customer_rg_name} not found; "
+                    f"treating as already deleted and continuing"
+                )
+                cluster_info["status"] = "Deleted"
+                self.utils.increment_counter("clusters_deleted_success")
+                return 0
             self.logging.error(f"[{cluster_name}] Failed to delete resource group {customer_rg_name}: {err}")
             cluster_info["status"] = "Delete Failed"
             self.utils.increment_counter("clusters_deleted_failed")
@@ -869,6 +877,12 @@ class Hypershift(Aro):
 
                 self.logging.debug(f"[{cluster_name}] Attempting to get metadata (attempt {attempt}/{max_retries})")
                 response = requests.get(cluster_url, headers=headers)
+                if response.status_code == 404:
+                    self.logging.warning(
+                        f"[{cluster_name}] Cluster not found in Azure (404); "
+                        f"will ignore for workload/delete"
+                    )
+                    break
                 response.raise_for_status()
                 azure_cluster_data = response.json()
                 self.logging.info(f"[{cluster_name}] Successfully retrieved metadata on attempt {attempt}")

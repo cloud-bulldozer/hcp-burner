@@ -88,17 +88,20 @@ class Aro(Platform):
 
         self.logging.info("Azure SDK authentication successful")
 
-        # Login to Azure CLI using service principal (required for az ad app create)
+        # Login to Azure CLI using service principal (required for az ad app create).
+        # az login does not read AZURE_CLIENT_SECRET; --password is required or it
+        # prompts interactively. Keep secret off log lines (do not log this argv).
         self.logging.info("Logging in to Azure CLI using service principal")
         try:
-            az_env = os.environ.copy()
-            az_env["AZURE_CLIENT_SECRET"] = azure_creds["ClientSecret"]
             az_login_cmd = [
                 "az", "login", "--service-principal",
                 "--username", azure_creds["ClientId"],
-                "--tenant", azure_creds["tenantId"]
+                "--password", azure_creds["ClientSecret"],
+                "--tenant", azure_creds["tenantId"],
             ]
-            az_login_result = subprocess.run(az_login_cmd, capture_output=True, text=True, timeout=60, env=az_env)
+            az_login_result = subprocess.run(
+                az_login_cmd, capture_output=True, text=True, timeout=60
+            )
 
             if az_login_result.returncode != 0:
                 self.logging.warning(f"Azure CLI login failed: {az_login_result.stderr}")

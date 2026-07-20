@@ -9,6 +9,7 @@ import base64
 import configparser
 import concurrent.futures
 import subprocess
+from copy import deepcopy
 
 from libs.platforms.gcp.gcp import Gcp
 from libs.platforms.gcp.gcp import GcpArguments
@@ -120,8 +121,8 @@ class Hypershiftcli(Gcp):
         myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
         ns = self.environment["hc_namespace"]
         self.logging.info(f"[{cluster_name}] Downloading kubeconfig from MC")
-        start = datetime.datetime.utcnow().timestamp()
-        while datetime.datetime.utcnow().timestamp() < start + 300:
+        start = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < start + 300:
             if self.utils.force_terminate:
                 return None
             code, out, _ = self.utils.subprocess_exec(
@@ -144,11 +145,15 @@ class Hypershiftcli(Gcp):
         return None
 
     def wait_for_controlplane_ready(self, cluster_name, wait_time):
+        """Wait until hosted control plane is available.
+
+        Returns absolute UTC unix timestamp when ready, or 0 on timeout/cancel.
+        """
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
         ns = self.environment["hc_namespace"]
-        start = datetime.datetime.utcnow().timestamp()
-        while datetime.datetime.utcnow().timestamp() < start + wait_time * 60:
+        start = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < start + wait_time * 60:
             if self.utils.force_terminate:
                 return 0
             code, out, _ = self.utils.subprocess_exec(
@@ -161,18 +166,22 @@ class Hypershiftcli(Gcp):
                 time.sleep(5)
                 continue
             if any(c.get("message") == "The hosted control plane is available" and c.get("status") == "True" for c in conditions):
-                elapsed = int(datetime.datetime.utcnow().timestamp() - start)
-                self.logging.info(f"[{cluster_name}] Control plane ready after {elapsed}s")
-                return elapsed
+                ready_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                self.logging.info(f"[{cluster_name}] Control plane ready after {ready_ts - int(start)}s")
+                return ready_ts
             time.sleep(1)
         return 0
 
     def wait_for_cluster_ready(self, cluster_name, wait_time):
+        """Wait until hosted cluster version history reaches Completed.
+
+        Returns absolute UTC unix timestamp when ready, or 0 on timeout/cancel.
+        """
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = self.environment["mc_kubeconfig"]
         ns = self.environment["hc_namespace"]
-        start = datetime.datetime.utcnow().timestamp()
-        while datetime.datetime.utcnow().timestamp() < start + wait_time * 60:
+        start = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < start + wait_time * 60:
             if self.utils.force_terminate:
                 return 0
             code, out, _ = self.utils.subprocess_exec(
@@ -185,19 +194,23 @@ class Hypershiftcli(Gcp):
                 time.sleep(5)
                 continue
             if status == "Completed":
-                elapsed = int(datetime.datetime.utcnow().timestamp() - start)
-                self.logging.info(f"[{cluster_name}] Cluster Completed after {elapsed}s")
-                return elapsed
+                ready_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                self.logging.info(f"[{cluster_name}] Cluster Completed after {ready_ts - int(start)}s")
+                return ready_ts
             self.logging.info(f"[{cluster_name}] Status: {status}, waiting...")
             time.sleep(15)
         return 0
 
     def _wait_for_workers(self, kubeconfig, worker_nodes, wait_time, cluster_name):
+        """Wait until worker nodes are Ready.
+
+        Returns absolute UTC unix timestamp when ready, or 0 on timeout/cancel.
+        """
         self.logging.info(f"[{cluster_name}] Waiting {wait_time}min for {worker_nodes} workers")
         myenv = os.environ.copy()
         myenv["KUBECONFIG"] = kubeconfig
-        start = int(datetime.datetime.utcnow().timestamp())
-        while datetime.datetime.utcnow().timestamp() < start + wait_time * 60:
+        start = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < start + wait_time * 60:
             if self.utils.force_terminate:
                 return 0
             code, out, _ = self.utils.subprocess_exec(
@@ -216,9 +229,9 @@ class Hypershiftcli(Gcp):
                        for c in node.get("status", {}).get("conditions", []))
             )
             if ready >= worker_nodes:
-                elapsed = int(datetime.datetime.utcnow().timestamp()) - start
-                self.logging.info(f"[{cluster_name}] {ready}/{worker_nodes} workers ready in {elapsed}s")
-                return elapsed
+                ready_ts = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                self.logging.info(f"[{cluster_name}] {ready}/{worker_nodes} workers ready in {ready_ts - start}s")
+                return ready_ts
             self.logging.info(f"[{cluster_name}] {ready}/{worker_nodes} workers ready, waiting...")
             time.sleep(15)
         self.logging.error(f"[{cluster_name}] Timeout waiting for workers")
@@ -660,16 +673,42 @@ class Hypershiftcli(Gcp):
                 f"gcloud dns managed-zones delete {child_zone} --project={project_id} --quiet"
             )
 
+    def _resolve_mgmt_cluster_name(self):
+        """Resolve MC name for metadata/ES (matches e2e-benchmarking GCP path)."""
+        mc_name = os.environ.get("MC_NAME") or os.environ.get("GKE_MC_CLUSTER_NAME")
+        if mc_name:
+            return mc_name
+        kubeconfig = self.environment.get("mc_kubeconfig")
+        if not kubeconfig:
+            return ""
+        code, out, _ = self.utils.subprocess_exec(
+            f"kubectl config current-context --kubeconfig={kubeconfig}",
+            extra_params={"universal_newlines": True},
+            log_output=False,
+        )
+        if code != 0 or not out:
+            return ""
+        # gke_<project>_<region>_<cluster> -> cluster (field 4), same as run.sh
+        parts = out.strip().split("_")
+        if len(parts) >= 4 and parts[0] == "gke":
+            return parts[3]
+        return parts[-1] if parts else ""
+
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         myenv = self.gcp_process_env({"KUBECONFIG": self.environment["mc_kubeconfig"]})
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
-        cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+        cluster_info["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         cluster_info["hostedclusters"] = self.environment["cluster_count"]
         cluster_info["install_method"] = "hypershiftcli"
         cluster_info["path"] = os.path.join(platform.environment["path"], cluster_name)
         os.makedirs(cluster_info["path"], exist_ok=True)
+        cluster_info["mgmt_cluster_name"] = self._resolve_mgmt_cluster_name()
+        if cluster_info["mgmt_cluster_name"]:
+            self.logging.info(
+                f"[{cluster_name}] Set mgmt_cluster_name: {cluster_info['mgmt_cluster_name']}"
+            )
 
         project_id = self.environment["gcp_project_id"]
         region = self.environment["gcp_region"]
@@ -750,7 +789,7 @@ class Hypershiftcli(Gcp):
 
         # Step 5: Create hosted cluster
         self.logging.info(f"[{cluster_name}] Step 5: Creating hosted cluster")
-        cluster_start_time = int(datetime.datetime.utcnow().timestamp())
+        cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 
         cluster_cmd = [
             "hypershift", "create", "cluster", "gcp",
@@ -798,18 +837,24 @@ class Hypershiftcli(Gcp):
             self.utils.increment_counter("clusters_created_failed")
             return 1
 
-        cluster_end_time = int(datetime.datetime.utcnow().timestamp())
         cluster_info["status"] = "Created"
-        cluster_info["install_duration"] = cluster_end_time - cluster_start_time
         cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
-        self.logging.info(f"[{cluster_name}] Cluster created in {cluster_info['install_duration']}s")
+        self.logging.info(
+            f"[{cluster_name}] Cluster create command finished in "
+            f"{int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - cluster_start_time}s"
+        )
 
         # Step 6: Wait for control plane
         self.logging.info(f"[{cluster_name}] Step 6: Waiting for control plane (10 min)")
-        cluster_info["cluster_controlplane_ready"] = self.wait_for_controlplane_ready(cluster_name, 10)
+        controlplane_ready_ts = self.wait_for_controlplane_ready(cluster_name, 10)
+        if controlplane_ready_ts:
+            cluster_info["cluster_controlplane_ready"] = controlplane_ready_ts - cluster_start_time
+        else:
+            cluster_info["cluster_controlplane_ready"] = None
 
         # Step 7: Download kubeconfig
         self.logging.info(f"[{cluster_name}] Step 7: Downloading kubeconfig")
+        kubeconfig_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         cluster_info["kubeconfig"] = self.download_kubeconfig(cluster_name, cluster_path)
         if not cluster_info["kubeconfig"]:
             self.logging.error(f"[{cluster_name}] Failed to download kubeconfig")
@@ -817,37 +862,108 @@ class Hypershiftcli(Gcp):
             cluster_info["status"] = "Completed. Not Access"
             self.utils.increment_counter("clusters_created_failed")
             return 1
+        cluster_info["kubeconfig_download_time"] = (
+            int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - kubeconfig_start_time
+        )
+
+        # Set install timing before waiting for workers (matches ARO/ROSA).
+        # utils.cluster_load uses cluster_start_time_on_mc / cluster_end_time for START_TIME/END_TIME.
+        cluster_end_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        cluster_info["status"] = "installed"
+        cluster_info["cluster_start_time_on_mc"] = cluster_start_time
+        cluster_info["cluster_end_time"] = cluster_end_time
+        if controlplane_ready_ts:
+            cluster_info["cluster_ready_time"] = controlplane_ready_ts - cluster_start_time
+            cluster_info["install_duration"] = cluster_info["cluster_ready_time"]
+        else:
+            cluster_info["cluster_ready_time"] = None
+            cluster_info["install_duration"] = cluster_end_time - cluster_start_time
+        if cluster_info.get("mgmt_cluster_name"):
+            cluster_info.setdefault("metadata", {})["mgmt_cluster"] = {
+                "cluster_name": cluster_info["mgmt_cluster_name"]
+            }
+        self.logging.info(
+            f"[{cluster_name}] Total installation duration: {cluster_info['install_duration']} seconds"
+        )
+        if cluster_info.get("cluster_ready_time"):
+            self.logging.info(
+                f"[{cluster_name}] Cluster ready time: {cluster_info['cluster_ready_time']} seconds"
+            )
 
         # Step 8: Wait for workers
         if cluster_info.get("workers_wait_time"):
-            cluster_info["workers_ready"] = self._wait_for_workers(
+            workers_ready_ts = self._wait_for_workers(
                 cluster_info["kubeconfig"], cluster_info["workers"],
                 cluster_info["workers_wait_time"], cluster_name
             )
+            if workers_ready_ts:
+                cluster_info["workers_ready"] = workers_ready_ts - cluster_start_time
+                self.logging.info(
+                    f"[{cluster_name}] Workers ready time: {cluster_info['workers_ready']} seconds"
+                )
+            else:
+                cluster_info["workers_ready"] = None
+                cluster_info["status"] = "Ready, missing workers"
 
-        # Step 9: Wait for cluster Completed
+        # Step 9: Wait for cluster Completed (guest version history)
         self.logging.info(f"[{cluster_name}] Step 9: Waiting for Completed status (60 min)")
-        cluster_info["cluster_ready"] = self.wait_for_cluster_ready(cluster_name, 60)
-        cluster_info["status"] = "Completed"
+        cluster_completed_ts = self.wait_for_cluster_ready(cluster_name, 60)
+        if cluster_completed_ts:
+            cluster_info["cluster_ready"] = cluster_completed_ts - cluster_start_time
+        else:
+            cluster_info["cluster_ready"] = None
+        # Keep top-level status as "installed" (ARO parity) so hcp-burner ES/docs
+        # and workload filters treat this as an install-time record. HostedCluster
+        # Completed state lives under metadata.status from get_metadata().
+        if cluster_info.get("status") != "Ready, missing workers":
+            cluster_info["status"] = "installed"
+        cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
+        if cluster_info.get("mgmt_cluster_name"):
+            cluster_info["metadata"]["mgmt_cluster"] = {
+                "cluster_name": cluster_info["mgmt_cluster_name"]
+            }
 
-        # Write metadata
-        with open(os.path.join(cluster_path, "metadata_install.json"), "w") as f:
-            json.dump(cluster_info, f, indent=2)
+        # Write metadata (includes start/end timestamps used by cluster_load indexing)
+        try:
+            os.makedirs(cluster_info["path"], exist_ok=True)
+            metadata_install_file = os.path.join(cluster_path, "metadata_install.json")
+            with open(metadata_install_file, "w") as f:
+                json.dump(cluster_info, f, indent=2)
+            self.logging.info(f"[{cluster_name}] Metadata install file written to {metadata_install_file}")
+        except Exception as err:
+            self.logging.error(f"[{cluster_name}] Failed to write metadata_install.json: {err}")
+            self.logging.error(f"[{cluster_name}] Attempted path: {cluster_info.get('path', 'N/A')}")
 
         if self.es is not None:
-            self.logging.info(f"[{cluster_name}] Indexing install metadata to Elasticsearch")
-            self.es.index_metadata(cluster_info)
-            os.environ["START_TIME"] = str(cluster_start_time)
-            os.environ["END_TIME"] = str(cluster_end_time)
+            self.logging.info(f"[{cluster_name}] ES is available, indexing cluster metadata")
+            try:
+                cluster_info_copy = deepcopy(cluster_info)
+                # Absolute timestamps are only for kube-burner START/END via cluster_load
+                del cluster_info_copy["cluster_start_time_on_mc"]
+                del cluster_info_copy["cluster_end_time"]
+                self.logging.info(
+                    f"[{cluster_name}] Indexing install_duration={cluster_info_copy.get('install_duration')} "
+                    f"cluster_ready_time={cluster_info_copy.get('cluster_ready_time')} "
+                    f"status={cluster_info_copy.get('status')} "
+                    f"mgmt_cluster_name={cluster_info_copy.get('mgmt_cluster_name')}"
+                )
+                self.es.index_metadata(cluster_info_copy)
+                self.logging.info(f"[{cluster_name}] Successfully indexed cluster metadata to ES")
+            except Exception as err:
+                self.logging.error(f"[{cluster_name}] Failed to index metadata to ES: {err}")
+            self.logging.info(f"[{cluster_name}] Indexing Management cluster stats")
             self.logging.info(
-                f"[{cluster_name}] Waiting 120s then indexing cluster metrics via e2e-benchmarking"
+                f"[{cluster_name}] Waiting 120s for HC prometheus to be available for scraping"
             )
             time.sleep(120)
-            self.utils.cluster_load(platform, cluster_name, load="index")
+            try:
+                self.utils.cluster_load(platform, cluster_name, load="index")
+            except Exception as err:
+                self.logging.error(f"[{cluster_name}] Failed to execute cluster_load (index): {err}")
         else:
             self.logging.warning(
-                f"[{cluster_name}] ES is not configured (pass --es-url / HCP_BURNER_ES_URL); "
-                f"skipping install metadata and e2e-benchmarking index. "
+                f"[{cluster_name}] ES is not available (self.es is None), skipping ES indexing. "
+                f"Check if HCP_BURNER_ES_URL / --es-url is set. "
                 f"Timings saved locally in {cluster_path}/metadata_install.json"
             )
 
@@ -860,7 +976,7 @@ class Hypershiftcli(Gcp):
         myenv = self.gcp_process_env({"KUBECONFIG": self.environment["mc_kubeconfig"]})
         cluster_info = platform.environment["clusters"][cluster_name]
         cluster_info["uuid"] = self.environment["uuid"]
-        cluster_info["timestamp"] = datetime.datetime.utcnow().isoformat()
+        cluster_info["timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         cluster_info["install_method"] = "hypershiftcli"
 
         project_id = self.environment["gcp_project_id"]
@@ -871,7 +987,7 @@ class Hypershiftcli(Gcp):
         extra = {"env": myenv, "preexec_fn": self.utils.disable_signals}
 
         self.logging.info(f"[{cluster_name}] Deleting GCP HyperShift cluster")
-        cluster_start_time = int(datetime.datetime.utcnow().timestamp())
+        cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
 
         # Step 1: Destroy hosted cluster (continue on failure, like the bash script)
         self.logging.info(f"[{cluster_name}] Step 1: Destroying hosted cluster")
@@ -911,7 +1027,7 @@ class Hypershiftcli(Gcp):
         )
         self._cleanup_cluster_dns(cluster_name, parent_domain, project_id)
 
-        cluster_end_time = int(datetime.datetime.utcnow().timestamp())
+        cluster_end_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
         cluster_info["destroy_duration"] = cluster_end_time - cluster_start_time
 
         if infra_code == 0 and iam_code == 0:

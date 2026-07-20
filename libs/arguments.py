@@ -44,7 +44,7 @@ class Arguments(argparse.ArgumentParser):
         self.common_parser.add_argument("--cluster-count", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTER_COUNT", type=int, default=1)
         self.common_parser.add_argument("--delay-between-batch", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_BATCH", default=60, type=int,
                                         help="If set it will wait x seconds between each batch request")
-        self.common_parser.add_argument("--batch-size", action=EnvDefault, env=environment, envvar="HCP_BURNER_BATCH_SIZE", type=int, default=0, help="number of clusters in a batch")
+        self.common_parser.add_argument("--batch-size", action=EnvDefault, env=environment, envvar="HCP_BURNER_BATCH_SIZE", type=int, default=1, help="number of clusters in a batch")
 
         self.common_parser.add_argument("--watcher-delay", action=EnvDefault, env=environment, envvar="HCP_BURNER_WATCHER_DELAY", default=60, type=int, help="Delay between each status check")
 

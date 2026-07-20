@@ -364,6 +364,19 @@ class Utils:
         if 'cluster_end_time' in platform.environment['clusters'][cluster_name]:
             load_env["END_TIME"] = f"{platform.environment['clusters'][cluster_name]['cluster_end_time']}"
             del platform.environment['clusters'][cluster_name]['cluster_end_time']
+        if load == "index":
+            start_time = load_env.get("START_TIME")
+            end_time = load_env.get("END_TIME")
+            if start_time and end_time:
+                self.logging.info(
+                    f"[{cluster_name}] Indexing with START_TIME={start_time} END_TIME={end_time} "
+                    f"(window {int(end_time) - int(start_time)}s)"
+                )
+            else:
+                self.logging.warning(
+                    f"[{cluster_name}] Indexing without cluster_start_time_on_mc/cluster_end_time; "
+                    f"START_TIME={start_time} END_TIME={end_time}"
+                )
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
 
@@ -377,6 +390,10 @@ class Utils:
                     del load_env["MC_KUBECONFIG"]
         else:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
+            if load == "index" and not load_env.get("MC_KUBECONFIG"):
+                self.logging.warning(
+                    f"[{cluster_name}] MC_KUBECONFIG is empty; management-cluster metrics may not index"
+                )
 
         if not os.path.exists(my_path + '/workload'):
             repo = platform.environment['load']['repo']
@@ -400,7 +417,7 @@ class Utils:
         # shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
         if load == "index":
-            load_env["EXTRA_FLAGS"] = "--check-health=False"
+            load_env["EXTRA_FLAGS"] = "--ignore-health-check"
         else:
             load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
         # if es_url is not None:

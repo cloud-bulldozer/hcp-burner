@@ -34,7 +34,10 @@ Following platforms are available at this moment:
 - [Rosa](https://cloud.redhat.com/learn/getting-started-red-hat-openshift-service-aws-rosa?extIdCarryOver=true&sc_cid=701f2000001OH7EAAW) (AWS)
     - [Hypershift](https://cloud.redhat.com/blog/hosted-control-planes-is-here-as-tech-preview) (Hosted Control Planes)
     - [Terraform](https://cloud.redhat.com/blog/rosa-joins-the-terraform-ecosystem) (ROSA installed using Terraform Provider)
-
+- ARO (Azure) — see `libs/platforms/aro/README.md`
+    - Hypershift (ARO-HCP)
+- GCP — see `libs/platforms/gcp/README.md`
+    - Hypershiftcli (GCP-HCP)
 
 
 ## Arguments, parameters and configuration options

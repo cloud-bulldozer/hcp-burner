@@ -240,28 +240,36 @@ class Utils:
         return platform
 
     def validate_azure_prom_token(self, platform, phase="workload"):
-        """Validate and load AZURE_PROM_TOKEN from file or environment variable."""
+        """Load AZURE_PROM_TOKEN from file or environment variable.
+
+        The token is always re-read from disk when azure_prom_token_file is set so a
+        refreshed file is picked up before each kube-burner spawn. Updating the file
+        after kube-burner has already started does not affect that process.
+        """
         if platform.environment.get("platform") != "aro":
             return True
 
         azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
 
-        # Option 1: Token file provided
+        # Option 1: Token file provided — always re-read (Azure AD tokens expire ~1h)
         if azure_prom_token_path and os.path.exists(azure_prom_token_path):
             file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(azure_prom_token_path))
             if file_age > timedelta(hours=1):
-                self.logging.warning(f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age})")
-                try:
-                    if input(f"[{phase}] Update token file and confirm (yes/no): ").strip().lower() not in ['yes', 'y']:
-                        self.azure_prom_token = None
-                        return False
-                except (EOFError, KeyboardInterrupt):
-                    self.azure_prom_token = None
-                    return False
+                self.logging.error(
+                    f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age}); "
+                    f"continuing with file contents — refresh {azure_prom_token_path} to avoid Prometheus 401"
+                )
             try:
                 with open(azure_prom_token_path, 'r') as f:
                     self.azure_prom_token = f.read().strip()
-                self.logging.info(f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path}")
+                if not self.azure_prom_token:
+                    self.logging.error(f"[{phase}] AZURE_PROM_TOKEN file is empty: {azure_prom_token_path}")
+                    self.azure_prom_token = None
+                    return False
+                self.logging.info(
+                    f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path} "
+                    f"(mtime age: {file_age})"
+                )
                 return True
             except Exception as err:
                 self.logging.error(f"[{phase}] Failed to read token file: {err}")
@@ -379,14 +387,21 @@ class Utils:
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
 
-        # Use pre-validated AZURE_PROM_TOKEN for ARO platform (validated once in load_scheduler)
+        # ARO: re-read token from file right before each kube-burner spawn (workload or index).
+        # Azure Monitor tokens expire ~1h; a value cached at load_scheduler/install start goes stale.
+        # Updating the file after this process is running still will not refresh an in-flight kube-burner.
         if platform.environment.get("platform") == "aro":
+            phase = f"{cluster_name}/{load or 'workload'}"
+            self.validate_azure_prom_token(platform, phase=phase)
             if self.azure_prom_token:
                 load_env["AZURE_PROM_TOKEN"] = self.azure_prom_token
             else:
                 # No valid token available, remove MC_KUBECONFIG if present
                 if "MC_KUBECONFIG" in load_env:
                     del load_env["MC_KUBECONFIG"]
+                self.logging.error(
+                    f"[{cluster_name}] AZURE_PROM_TOKEN missing/empty; Azure Prometheus scrape will 401"
+                )
         else:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
 

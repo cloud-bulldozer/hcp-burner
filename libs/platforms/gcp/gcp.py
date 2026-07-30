@@ -29,13 +29,20 @@ class Gcp(Platform):
         creds_file = self.environment["gcp_credentials_file"]
         client_email = self.environment["gcp"].get("client_email", "")
 
-        self.logging.info("Authenticating with GCP using service account")
-        auth_code, _, _ = self.utils.subprocess_exec(
-            f"gcloud auth activate-service-account {client_email} --key-file={creds_file}"
-        )
-        if auth_code != 0:
-            self.logging.error("Failed to authenticate with GCP")
-            sys.exit("Exiting...")
+        credential_type = self.environment["gcp"].get("credential_type")
+        if credential_type == "authorized_user":
+            self.logging.info(
+                "Using authorized_user ADC credentials; skipping gcloud auth "
+                "(user is already authenticated via 'gcloud auth application-default login')"
+            )
+        else:
+            self.logging.info("Authenticating with GCP using service account")
+            auth_code, _, _ = self.utils.subprocess_exec(
+                f"gcloud auth activate-service-account {client_email} --key-file={creds_file}"
+            )
+            if auth_code != 0:
+                self.logging.error("Failed to authenticate with GCP")
+                sys.exit("Exiting...")
 
         set_code, _, _ = self.utils.subprocess_exec(
             f"gcloud config set project {project_id}"

@@ -31,21 +31,31 @@ class GCP:
                 )
                 sys.exit("Exiting...")
 
-            required_keys = ["project_id", "client_email", "private_key"]
-            missing_keys = [key for key in required_keys if key not in self.gcp_credentials]
-            if missing_keys:
-                self.logging.error(
-                    f"Missing required credentials in file {self.credentials_file}: "
-                    f"{', '.join(missing_keys)}"
+            self.credential_type = self.gcp_credentials.get("type", "service_account")
+
+            if self.credential_type == "authorized_user":
+                self.logging.info(
+                    f"Detected authorized_user credentials in {self.credentials_file}; "
+                    "project_id and region must be supplied via CLI arguments"
                 )
-                sys.exit("Exiting...")
+            else:
+                required_keys = ["project_id", "client_email", "private_key"]
+                missing_keys = [key for key in required_keys if key not in self.gcp_credentials]
+                if missing_keys:
+                    self.logging.error(
+                        f"Missing required credentials in file {self.credentials_file}: "
+                        f"{', '.join(missing_keys)}"
+                    )
+                    sys.exit("Exiting...")
 
             self.logging.info(f"GCP configuration verified for file {self.credentials_file}")
             self.logging.debug(
-                f"GCP Credentials: project_id={self.gcp_credentials.get('project_id', 'N/A')}, "
+                f"GCP Credentials: type={self.credential_type}, "
+                f"project_id={self.gcp_credentials.get('project_id', 'N/A')}, "
                 f"client_email={self.gcp_credentials.get('client_email', 'N/A')}"
             )
         else:
+            self.credential_type = None
             self.logging.info(
                 "GCP credentials file is not provided or not found; "
                 "GOOGLE_APPLICATION_CREDENTIALS / ADC environment variables are being used"
@@ -67,10 +77,16 @@ class GCP:
                     f"Credentials file project_id ({self.gcp_credentials['project_id']}) differs "
                     f"from --gcp-project-id ({project_id}); using --gcp-project-id for API calls"
                 )
-            self.logging.info(
-                f"ADC identity: {self.gcp_credentials.get('client_email')} "
-                f"(GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT={project_id})"
-            )
+            if self.credential_type == "authorized_user":
+                self.logging.info(
+                    f"ADC identity: authorized_user "
+                    f"(GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT={project_id})"
+                )
+            else:
+                self.logging.info(
+                    f"ADC identity: {self.gcp_credentials.get('client_email')} "
+                    f"(GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT={project_id})"
+                )
 
     def set_gcp_environment(self, project_id, gcp_region):
         """Return GCP info dict for the platform environment object."""
@@ -79,6 +95,7 @@ class GCP:
             "region": gcp_region,
             "credentials_file": self.credentials_file,
         }
+        gcp["credential_type"] = self.credential_type
         if self.credentials_file and os.path.exists(self.credentials_file):
             gcp["client_email"] = self.gcp_credentials.get("client_email", "")
             gcp["credentials_project_id"] = self.gcp_credentials.get("project_id", "")

@@ -453,10 +453,10 @@ class Hypershift(Aro):
                 except Exception as save_err:
                     self.logging.warning(f"[{cluster_name}] Failed to save cluster deployment result JSON: {save_err}")
 
-                # Wait for cluster provisioning state to be Succeeded or Failed (up to 30 minutes)
-                self.logging.info(f"[{cluster_name}] Waiting for cluster provisioning state to be Succeeded or Failed (max 30 minutes)")
+                # Wait for cluster provisioning state to be Succeeded or Failed (up to 60 minutes)
+                self.logging.info(f"[{cluster_name}] Waiting for cluster provisioning state to be Succeeded or Failed (max 60 minutes)")
                 provisioning_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-                wait_timeout = 30 * 60  # 30 minutes in seconds
+                wait_timeout = 60 * 60  # 60 minutes in seconds
                 check_interval = 30  # Check every 30 seconds
                 provisioning_state = None
                 cluster_ready_time = None
@@ -503,7 +503,7 @@ class Hypershift(Aro):
                 # Check if we timed out
                 if provisioning_state not in ["Succeeded", "Failed"]:
                     elapsed_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
-                    self.logging.error(f"[{cluster_name}] Did not reach Succeeded or Failed state within 30 minutes (elapsed: {elapsed_time}s, final state: {provisioning_state})")
+                    self.logging.error(f"[{cluster_name}] Did not reach Succeeded or Failed state within 60 minutes (elapsed: {elapsed_time}s, final state: {provisioning_state})")
                     cluster_info["status"] = "Failed - Timeout"
                     self.utils.increment_counter("clusters_created_failed")
                     return 1

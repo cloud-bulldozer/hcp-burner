@@ -420,6 +420,9 @@ class Utils:
             load_env["EXTRA_FLAGS"] = "--ignore-health-check"
         else:
             load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
+        extra_flags = platform.environment['load'].get('extra_flags', '')
+        if extra_flags:
+            load_env["EXTRA_FLAGS"] = extra_flags + " " + load_env["EXTRA_FLAGS"]
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"

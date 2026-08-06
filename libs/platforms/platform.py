@@ -69,6 +69,7 @@ class Platform:
         self.environment['load']["executor"] = arguments["workload_executor"]
         self.environment['load']['duration'] = arguments['workload_duration']
         self.environment['load']['jobs'] = arguments['workload_jobs']
+        self.environment['load']['extra_flags'] = arguments['workload_extra_flags']
 
         if arguments["static_cluster_name"]:
             self.environment["cluster_name_seed"] = arguments["static_cluster_name"]

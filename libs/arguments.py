@@ -59,6 +59,7 @@ class Arguments(argparse.ArgumentParser):
         self.common_parser.add_argument("--workload-executor", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXECUTOR", help="Complete path of binary used to execute the workload", default="/usr/bin/kube-burner")
         self.common_parser.add_argument("--workload-duration", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_DURATION", default="1h", type=str, help="Workload execution duration in minutes")
         self.common_parser.add_argument("--workload-jobs", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_JOBS", type=int, default=10, help="Jobs per worker.Workload will scale this number to the number of workers of the cluster")
+        self.common_parser.add_argument("--workload-extra-flags", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXTRA_FLAGS", default="", type=str, help="Extra flags passed directly to the workload binary (e.g. --pods-per-node=100)")
 
         self.common_parser.add_argument("--cleanup-clusters", action="store_true", help="Delete all created clusters at the end")
         self.common_parser.add_argument("--wait-before-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_WAIT_BEFORE_CLEANUP", help="Minutes to wait before starting the cleanup process", default=0, type=int)

@@ -711,14 +711,19 @@ class Hypershiftcli(Gcp):
             )
 
         project_id = self.environment["gcp_project_id"]
+        hc_project_id = self.environment.get("gcp_hc_project_id", project_id)
         region = self.environment["gcp_region"]
         ns = self.environment["hc_namespace"]
         cluster_path = cluster_info["path"]
         parent_domain = self.environment.get("base_domain", "").strip()
 
+        if hc_project_id != project_id:
+            self.logging.info(f"[{cluster_name}] Using MC project: {project_id}, HC project: {hc_project_id}")
+
         self.logging.info(f"[{cluster_name}] Starting GCP HyperShift cluster creation")
 
         # Step 0: Create child Cloud DNS zone + NS delegation under parent base-domain
+        # DNS stays in the MC project
         self.logging.info(f"[{cluster_name}] Step 0: Creating Cloud DNS zone and parent NS delegation")
         dns_domain = self._ensure_cluster_dns(cluster_name, parent_domain, project_id)
         if not dns_domain:
@@ -741,7 +746,7 @@ class Hypershiftcli(Gcp):
         self.logging.info(f"[{cluster_name}] Step 2: Creating IAM resources")
         iam_output = os.path.join(cluster_path, "iam-output.json")
         iam_code, _, _ = self.utils.subprocess_exec(
-            f"hypershift create iam gcp --infra-id={cluster_name} --project-id={project_id} --oidc-jwks-file={jwks_path}",
+            f"hypershift create iam gcp --infra-id={cluster_name} --project-id={hc_project_id} --oidc-jwks-file={jwks_path}",
             iam_output,
             gcp_extra,
         )
@@ -755,7 +760,7 @@ class Hypershiftcli(Gcp):
         self.logging.info(f"[{cluster_name}] Step 3: Creating infrastructure")
         infra_output = os.path.join(cluster_path, "infra-output.json")
         infra_code, _, _ = self.utils.subprocess_exec(
-            f"hypershift create infra gcp --infra-id={cluster_name} --project-id={project_id} --region={region}",
+            f"hypershift create infra gcp --infra-id={cluster_name} --project-id={hc_project_id} --region={region}",
             infra_output,
             gcp_extra,
         )
@@ -797,7 +802,7 @@ class Hypershiftcli(Gcp):
             f"--namespace={ns}",
             f"--release-image={self.environment['release_image']}",
             f"--pull-secret={self.environment['pull_secret_path']}",
-            f"--project={project_id}",
+            f"--project={hc_project_id}",
             f"--region={region}",
             f"--network={network_name}",
             f"--subnet={subnet_name}",
@@ -980,6 +985,7 @@ class Hypershiftcli(Gcp):
         cluster_info["install_method"] = "hypershiftcli"
 
         project_id = self.environment["gcp_project_id"]
+        hc_project_id = self.environment.get("gcp_hc_project_id", project_id)
         region = self.environment["gcp_region"]
         ns = self.environment["hc_namespace"]
         cluster_path = cluster_info.get("path", os.path.join(platform.environment["path"], cluster_name))
@@ -1006,7 +1012,7 @@ class Hypershiftcli(Gcp):
         # Step 2: Destroy infrastructure
         self.logging.info(f"[{cluster_name}] Step 2: Destroying infrastructure")
         infra_code, _, _ = self.utils.subprocess_exec(
-            f"hypershift destroy infra gcp --infra-id={cluster_name} --project-id={project_id} --region={region}",
+            f"hypershift destroy infra gcp --infra-id={cluster_name} --project-id={hc_project_id} --region={region}",
             os.path.join(cluster_path, "cleanup-infra.log"),
             extra
         )
@@ -1014,7 +1020,7 @@ class Hypershiftcli(Gcp):
         # Step 3: Destroy IAM resources
         self.logging.info(f"[{cluster_name}] Step 3: Destroying IAM resources")
         iam_code, _, _ = self.utils.subprocess_exec(
-            f"hypershift destroy iam gcp --infra-id={cluster_name} --project-id={project_id}",
+            f"hypershift destroy iam gcp --infra-id={cluster_name} --project-id={hc_project_id}",
             os.path.join(cluster_path, "cleanup-iam.log"),
             extra
         )

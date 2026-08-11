@@ -18,6 +18,7 @@ class Gcp(Platform):
             arguments["gcp_project_id"], arguments["gcp_region"]
         )
         self.environment["gcp_project_id"] = arguments["gcp_project_id"]
+        self.environment["gcp_hc_project_id"] = arguments["gcp_hc_project_id"] or arguments["gcp_project_id"]
         self.environment["gcp_region"] = arguments["gcp_region"]
         self.environment["gcp_credentials_file"] = self.environment["gcp"]["credentials_file"]
         self.environment["commands"].append("gcloud")
@@ -85,6 +86,7 @@ class GcpArguments(PlatformArguments):
 
         parser.add_argument("--gcp-project-id", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_PROJECT_ID", help="GCP Project ID")
         parser.add_argument("--gcp-region", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_REGION", default="us-central1", help="GCP Region")
+        parser.add_argument("--gcp-hc-project-id", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_HC_PROJECT_ID", default="", help="GCP Project ID for hosted clusters (defaults to --gcp-project-id if not set)")
         parser.add_argument("--gcp-credentials-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_GCP_CREDENTIALS_FILE", help="GCP service account credentials JSON file")
 
         if config_file:

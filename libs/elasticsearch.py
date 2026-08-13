@@ -1,57 +1,94 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Module to set connection to ElasticSearch and functions to upload documents
+Module to set connection to ElasticSearch/OpenSearch and functions to upload documents
 """
 import argparse
 import configparser
 import sys
 import ssl
-from elasticsearch import Elasticsearch as ES
-from elasticsearch.exceptions import NotFoundError
+from urllib.parse import urlparse, unquote
 import urllib3
-from urllib3.util import Retry
+from libs.sanitize import redact_metadata
+
+OS = None
+ES = None
+try:
+    from opensearchpy import OpenSearch as OS
+    from opensearchpy.exceptions import NotFoundError
+    _USE_OPENSEARCH = True
+except ImportError:
+    from elasticsearch import Elasticsearch as ES
+    from elasticsearch.exceptions import NotFoundError
+    _USE_OPENSEARCH = False
 
 
 class Elasticsearch:
-    """ES Class"""
+    """ES/OpenSearch Class"""
 
     def __init__(self, logging, url, index, insecure, retries):
         super().__init__()
         self.logging = logging
         self.index = index
 
-        retry_on_timeout = True
-        retry_strategy = Retry(total=retries, backoff_factor=0.1)
-        retry_params = {
-            "retry_on_timeout": retry_on_timeout,
-            "retry": retry_strategy,
-        }
+        self.logging.info("Initializing Elasticsearch/OpenSearch Connector...")
 
-        self.logging.info("Initializing Elasticsearch Connector...")
+        parsed = urlparse(url)
+        auth = None
+        if parsed.username and parsed.password:
+            auth = (unquote(parsed.username), unquote(parsed.password))
+            clean_url = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 443}"
+        else:
+            clean_url = url
+
         if url.startswith("https://"):
-            self.logging.debug("Setting Elasticsearch Connector with SSL...")
+            self.logging.debug("Setting Connector with SSL...")
             ssl_ctx = ssl.create_default_context()
             if str(insecure).lower() == "true":
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-                self.logging.debug("Setting Elasticsearch Connector with SSL unverified...")
+                self.logging.debug("Setting Connector with SSL unverified...")
                 ssl_ctx.check_hostname = False
                 ssl_ctx.verify_mode = ssl.CERT_NONE
-            self.elastic = ES(url, ssl_context=ssl_ctx, verify_certs=False, **retry_params)
+
+            if _USE_OPENSEARCH:
+                self.elastic = OS(
+                    clean_url,
+                    http_auth=auth,
+                    ssl_context=ssl_ctx,
+                    verify_certs=False,
+                    max_retries=retries,
+                    retry_on_timeout=True,
+                )
+            else:
+                kwargs = {"ssl_context": ssl_ctx, "verify_certs": False, "max_retries": retries, "retry_on_timeout": True}
+                if auth:
+                    kwargs["basic_auth"] = auth
+                self.elastic = ES(clean_url, **kwargs)
+
         elif url.startswith("http://"):
-            self.elastic = ES(url, **retry_params)
+            if _USE_OPENSEARCH:
+                self.elastic = OS(clean_url, http_auth=auth, max_retries=retries, retry_on_timeout=True)
+            else:
+                kwargs = {"max_retries": retries, "retry_on_timeout": True}
+                if auth:
+                    kwargs["basic_auth"] = auth
+                self.elastic = ES(clean_url, **kwargs)
         else:
-            self.logging.error(f"Failed to initialize Elasticsearch with url {url}. It must start with http(s)://")
+            self.logging.error(f"Failed to initialize with url {clean_url}. It must start with http(s)://")
             sys.exit("Exiting...")
-        self.logging.debug("Testing Elasticsearch connection")
+
+        self.logging.debug("Testing connection")
         if self.elastic.ping():
             self.logging.debug("Version: " + self.elastic.info()["version"]["number"])
             if not self._check_index():
-                self.logging.error(f"ES index {index} do not exists")
+                self.logging.error(f"Index {index} does not exist")
                 sys.exit("Exiting...")
         else:
-            self.logging.error(f"Cannot stablish connection with {url}")
+            self.logging.error(f"Cannot establish connection with {clean_url}")
             sys.exit("Exiting...")
+
+        backend = "opensearch-py" if _USE_OPENSEARCH else "elasticsearch"
+        self.logging.info(f"Connected using {backend}")
 
     def _check_index(self):
         try:
@@ -60,14 +97,19 @@ class Elasticsearch:
             return False
 
     def index_metadata(self, metadata):
-        self.logging.debug(f"Indexing data on {self.elastic.transport.hosts[0]}/{self.index}")
-        self.logging.debug(metadata)
+        try:
+            hosts = self.elastic.transport.hosts if hasattr(self.elastic.transport, 'hosts') else [{"host": "unknown"}]
+            self.logging.debug(f"Indexing data on {hosts[0]}/{self.index}")
+        except Exception:
+            self.logging.debug(f"Indexing data on {self.index}")
+        self.logging.debug(f"Indexing metadata keys: {list(metadata.keys())}")
+        self.logging.debug(redact_metadata(metadata))
         try:
             self.elastic.index(index=self.index, body=metadata)
         except Exception as err:
             self.logging.error(err)
-            self.logging.error(f"Failed to index data on on {self.elastic.transport.hosts[0]}/{self.elastic.info().get('index')})")
-            self.logging.error(metadata)
+            self.logging.error(f"Failed to index data on {self.index}")
+            self.logging.error(redact_metadata(metadata))
 
 
 class ElasticArguments:

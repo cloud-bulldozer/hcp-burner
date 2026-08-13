@@ -8,11 +8,12 @@ import configparser
 import argparse
 import shlex
 from copy import deepcopy
-from azure.mgmt.resource.resources.v2022_09_01.models import DeploymentMode, Deployment, DeploymentProperties
+from azure.mgmt.resource.resources.models import DeploymentMode, Deployment, DeploymentProperties
 from azure.core.exceptions import HttpResponseError
 import requests
 import subprocess
 from kubernetes import client as k8s_client, config as k8s_config
+from libs.sanitize import redact_output, redact_url
 from kubernetes.client.rest import ApiException
 from libs.platforms.aro.aro import Aro
 from libs.platforms.aro.aro import AroArguments
@@ -42,6 +43,7 @@ class Hypershift(Aro):
         self.environment["add_aro_hcp_infra"] = arguments["add_aro_hcp_infra"]
         self.environment["issuer_url"] = arguments["issuer_url"]
         self.environment["azure_prom_token_file"] = arguments["azure_prom_token_file"]
+        self.environment["swift"] = arguments["swift"]
 
     def initialize(self):
         super().initialize()
@@ -53,8 +55,20 @@ class Hypershift(Aro):
 
         # Convert string boolean arguments to actual booleans
         self.environment["add_aro_hcp_infra"] = self._str_to_bool(self.environment.get("add_aro_hcp_infra", "False"))
+        self.environment["swift"] = self._str_to_bool(self.environment.get("swift", "True"))
 
         self.logging.info("ARO Hypershift platform initialized")
+
+    def _resolve_cluster_version(self, aro_version, channel):
+        """Resolve the cluster version based on the channel group.
+
+        For nightly/candidate channels, pass the full version string as-is.
+        For stable/fast channels, trim to major.minor (e.g., 4.23 from 4.23.8).
+        """
+        if channel in ("nightly", "candidate"):
+            return aro_version
+        version_parts = aro_version.split('.')
+        return f"{version_parts[0]}.{version_parts[1]}" if len(version_parts) >= 2 else aro_version
 
     def _str_to_bool(self, value):
         """Convert string to boolean. Accepts: true/false, 1/0, yes/no (case insensitive)"""
@@ -73,7 +87,89 @@ class Hypershift(Aro):
             template_path = f"libs/platforms/aro/bicep/{template_name}"
         return template_path
 
-    def _create_infrastructure(self, cluster_name, customer_rg_name, location, ticket_id, customer_nsg, customer_vnet_name, customer_vnet_subnet1, cluster_path):
+    def _compile_bicep_template(self, cluster_name, template_name, output_json_path):
+        """Compile a Bicep template to JSON for ARM deployment."""
+        bicep_path = self._get_bicep_template_path(template_name)
+        compile_cmd = (
+            f"az bicep build --file {shlex.quote(bicep_path)} "
+            f"--outfile {shlex.quote(output_json_path)}"
+        )
+        compile_result = subprocess.run(compile_cmd, shell=True, capture_output=True, text=True)
+        if compile_result.returncode != 0:
+            self.logging.error(
+                f"[{cluster_name}] Failed to compile {template_name}: {compile_result.stderr}"
+            )
+            return False
+        return True
+
+    def _extract_deployment_output_value(self, output):
+        """Normalize ARM deployment output entries to their runtime value."""
+        if output is None:
+            return None
+        if hasattr(output, "value"):
+            return output.value
+        if isinstance(output, dict):
+            return output.get("value", output)
+        return output
+
+    def _get_deployment_output_values(self, resource_group_name, deployment_name):
+        """Return deployment output values keyed by output name."""
+        deployment = self.resource_client.deployments.get(
+            resource_group_name=resource_group_name,
+            deployment_name=deployment_name,
+        )
+        outputs = deployment.properties.outputs if deployment.properties else None
+        if not outputs:
+            return {}
+        return {
+            name: self._extract_deployment_output_value(output)
+            for name, output in outputs.items()
+        }
+
+    def _wait_for_arm_deployment(self, cluster_name, customer_rg_name, deployment_name, wait_timeout=60 * 60):
+        """
+        Poll an ARM deployment until Succeeded or Failed.
+        Returns (provisioning_state, ready_timestamp) on success, or (state, None) on failure/timeout.
+        """
+        provisioning_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        check_interval = 30
+        provisioning_state = None
+
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < provisioning_start_time + wait_timeout:
+            if self.utils.force_terminate:
+                self.logging.error(f"[{cluster_name}] Exiting after Ctrl-C while waiting for {deployment_name}")
+                return None, None
+
+            try:
+                deployment = self.resource_client.deployments.get(
+                    resource_group_name=customer_rg_name,
+                    deployment_name=deployment_name,
+                )
+                if deployment.properties and deployment.properties.provisioning_state:
+                    provisioning_state = deployment.properties.provisioning_state
+                    self.logging.info(
+                        f"[{cluster_name}] Deployment {deployment_name} state: {provisioning_state}"
+                    )
+                    if provisioning_state == "Succeeded":
+                        ready_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                        return provisioning_state, ready_time
+                    if provisioning_state == "Failed":
+                        return provisioning_state, None
+                    elapsed = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
+                    self.logging.info(
+                        f"[{cluster_name}] Deployment {deployment_name} still running "
+                        f"(elapsed: {elapsed}s)"
+                    )
+            except HttpResponseError as err:
+                self.logging.warning(
+                    f"[{cluster_name}] Error checking deployment {deployment_name}: {err}"
+                )
+
+            time.sleep(check_interval)
+
+        return provisioning_state, None
+
+    def _create_infrastructure(self, cluster_name, customer_rg_name, location, ticket_id, customer_nsg, customer_vnet_name, customer_vnet_subnet1, cluster_path, swift=True):
         """
         Create resource group and infrastructure deployment.
 
@@ -86,6 +182,7 @@ class Hypershift(Aro):
             customer_vnet_name: Virtual Network name
             customer_vnet_subnet1: Virtual Network Subnet 1 name
             cluster_path: Path to cluster directory for compiled templates
+            swift: Enable SWIFT networking with additional VNet integration subnet
 
         Returns:
             tuple: (key_vault_name, customer_rg_name) on success
@@ -95,7 +192,7 @@ class Hypershift(Aro):
         """
         # Step 1: Create Resource Group
         self.logging.info(f"[{cluster_name}] Creating resource group {customer_rg_name}")
-        from azure.mgmt.resource.resources.v2022_09_01.models import ResourceGroup
+        from azure.mgmt.resource.resources.models import ResourceGroup
         resource_group_params = ResourceGroup(location=location, tags={"TicketId": ticket_id})
 
         try:
@@ -116,11 +213,20 @@ class Hypershift(Aro):
         infra_parameters = {
             "customerNsgName": {"value": customer_nsg},
             "customerVnetName": {"value": customer_vnet_name},
-            "customerVnetSubnetName": {"value": customer_vnet_subnet1}
+            "customerVnetSubnetName": {"value": customer_vnet_subnet1},
+            "swift": {"value": swift}
         }
+        if swift:
+            vnet_integration_subnet_name = f"{cluster_name}-vnet-integration-subnet"
+            infra_parameters["customerVirtualNetworkIntegrationSubnetName"] = {
+                "value": vnet_integration_subnet_name
+            }
+            self.logging.info(
+                f"[{cluster_name}] SWIFT enabled, will create VNet integration subnet: "
+                f"{vnet_integration_subnet_name}"
+            )
 
         # Compile Bicep template to JSON
-        import subprocess
         output_file = os.path.join(cluster_path, "customer-infra.json")
         compile_cmd = f"az bicep build --file {shlex.quote(bicep_template_path)} --outfile {shlex.quote(output_file)}"
         compile_result = subprocess.run(compile_cmd, shell=True, capture_output=True, text=True)
@@ -190,7 +296,7 @@ class Hypershift(Aro):
             tuple: (exists: bool, is_ready: bool, cluster_info: dict or None)
         """
         try:
-            api_version = "2024-06-10-preview"
+            api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
             cluster_resource_id = f"/subscriptions/{subscription_id}/resourceGroups/{customer_rg_name}/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
             cluster_url = f"https://management.azure.com{cluster_resource_id}?api-version={api_version}"
 
@@ -338,7 +444,8 @@ class Hypershift(Aro):
                     customer_nsg=customer_nsg,
                     customer_vnet_name=customer_vnet_name,
                     customer_vnet_subnet1=customer_vnet_subnet1,
-                    cluster_path=cluster_info["path"]
+                    cluster_path=cluster_info["path"],
+                    swift=self.environment.get("swift", True)
                 )
             except Exception as err:
                 error_msg = str(err)
@@ -355,32 +462,21 @@ class Hypershift(Aro):
                 self.utils.increment_counter("clusters_created_failed")
                 return 1
 
-            # Step 4: Create ARO HCP Cluster Deployment
-            self.logging.info(f"[{cluster_name}] Step 4: Creating ARO HCP cluster deployment")
-            cluster_bicep_path = self._get_bicep_template_path("cluster.bicep")
+            # Step 4: Cluster prerequisites (identities, RBAC) then cluster create only
+            self.logging.info(f"[{cluster_name}] Step 4: Deploying cluster prerequisites and cluster resource")
+            swift = self.environment.get("swift", True)
+            self.logging.info(f"[{cluster_name}] Swift value: {swift} (type: {type(swift).__name__})")
+            prereqs_template = "cluster-prereqs_sw.bicep" if swift else "cluster-prereqs.bicep"
+            create_template = "cluster_create_sw.bicep" if swift else "cluster_create.bicep"
+            if swift:
+                self.logging.info(
+                    f"[{cluster_name}] SWIFT enabled, using cluster_create_sw.bicep with 2025-12-23-preview API"
+                )
 
-            # Compile cluster Bicep template
-            output_file = os.path.join(cluster_info['path'], "cluster.json")
-            compile_cmd = f"az bicep build --file {shlex.quote(cluster_bicep_path)} --outfile {shlex.quote(output_file)}"
-            compile_result = subprocess.run(compile_cmd, shell=True, capture_output=True, text=True)
-
-            if compile_result.returncode != 0:
-                self.logging.error(f"[{cluster_name}] Failed to compile cluster Bicep template: {compile_result.stderr}")
-                cluster_info["status"] = "Failed - Cluster Bicep Compilation"
-                self.utils.increment_counter("clusters_created_failed")
-                return 1
-
-            compiled_cluster_template_path = f"{cluster_info['path']}/cluster.json"
-            with open(compiled_cluster_template_path, 'r') as f:
-                cluster_template_json = json.load(f)
-
-            # Prepare parameters for cluster deployment
             aro_version = self.environment.get("aro_version", "4.20.8")
             aro_version_channel = self.environment.get("aro_version_channel", "stable")
-            # For cluster, use only major.minor (e.g., 4.20 from 4.20.8)
-            version_parts = aro_version.split('.')
-            cluster_version = f"{version_parts[0]}.{version_parts[1]}" if len(version_parts) >= 2 else aro_version
-            cluster_parameters = {
+            cluster_version = self._resolve_cluster_version(aro_version, aro_version_channel)
+            base_cluster_parameters = {
                 "vnetName": {"value": customer_vnet_name},
                 "subnetName": {"value": customer_vnet_subnet1},
                 "nsgName": {"value": customer_nsg},
@@ -388,91 +484,142 @@ class Hypershift(Aro):
                 "managedResourceGroupName": {"value": managed_resource_group},
                 "keyVaultName": {"value": key_vault_name},
                 "clusterVersion": {"value": cluster_version},
-                "versionChannelGroup": {"value": aro_version_channel}
+                "versionChannelGroup": {"value": aro_version_channel},
             }
+            if swift:
+                base_cluster_parameters["vnetIntegrationSubnetName"] = {
+                    "value": f"{cluster_name}-vnet-integration-subnet"
+                }
 
-            cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-            # Create cluster deployment
-            cluster_deployment_properties = DeploymentProperties(
+            prereqs_json_path = os.path.join(cluster_info['path'], "cluster-prereqs.json")
+            if not self._compile_bicep_template(cluster_name, prereqs_template, prereqs_json_path):
+                cluster_info["status"] = "Failed - Cluster Prereqs Bicep Compilation"
+                self.utils.increment_counter("clusters_created_failed")
+                return 1
+
+            with open(prereqs_json_path, 'r') as f:
+                prereqs_template_json = json.load(f)
+
+            prereqs_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+            prereqs_deployment_properties = DeploymentProperties(
                 mode=DeploymentMode.INCREMENTAL,
-                template=cluster_template_json,
-                parameters=cluster_parameters
+                template=prereqs_template_json,
+                parameters=base_cluster_parameters,
             )
-            cluster_deployment = Deployment(properties=cluster_deployment_properties)
+            prereqs_deployment = Deployment(properties=prereqs_deployment_properties)
+
+            cluster_ready_time = None
+            cluster_start_time = None
 
             try:
+                self.logging.info(f"[{cluster_name}] Deploying cluster prerequisites (aro-hcp-prereqs)")
+                prereqs_operation = self.resource_client.deployments.begin_create_or_update(
+                    resource_group_name=customer_rg_name,
+                    deployment_name="aro-hcp-prereqs",
+                    parameters=prereqs_deployment,
+                )
+                prereqs_operation.result()
+                prereqs_state, _ = self._wait_for_arm_deployment(
+                    cluster_name, customer_rg_name, "aro-hcp-prereqs"
+                )
+                if prereqs_state != "Succeeded":
+                    cluster_info["status"] = "Failed - Cluster Prereqs Deployment"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+
+                prereqs_outputs = self._get_deployment_output_values(customer_rg_name, "aro-hcp-prereqs")
+                operators_auth = prereqs_outputs.get("operatorsAuth")
+                hcp_identity = prereqs_outputs.get("hcpIdentity")
+                if not operators_auth or not hcp_identity:
+                    self.logging.error(
+                        f"[{cluster_name}] Missing operatorsAuth/hcpIdentity outputs from aro-hcp-prereqs"
+                    )
+                    cluster_info["status"] = "Failed - Cluster Prereqs Outputs"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+
+                cluster_info["cluster_prereqs_duration"] = (
+                    int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - prereqs_start_time
+                )
+                self.logging.info(
+                    f"[{cluster_name}] Cluster prerequisites completed in "
+                    f"{cluster_info['cluster_prereqs_duration']} seconds"
+                )
+
+                create_json_path = os.path.join(cluster_info['path'], "cluster-create.json")
+                if not self._compile_bicep_template(cluster_name, create_template, create_json_path):
+                    cluster_info["status"] = "Failed - Cluster Create Bicep Compilation"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+
+                with open(create_json_path, 'r') as f:
+                    cluster_template_json = json.load(f)
+
+                cluster_create_parameters = dict(base_cluster_parameters)
+                cluster_create_parameters["operatorsAuth"] = {"value": operators_auth}
+                cluster_create_parameters["hcpIdentity"] = {"value": hcp_identity}
+
+                cluster_deployment_properties = DeploymentProperties(
+                    mode=DeploymentMode.INCREMENTAL,
+                    template=cluster_template_json,
+                    parameters=cluster_create_parameters,
+                )
+                cluster_deployment = Deployment(properties=cluster_deployment_properties)
+
                 cluster_deployment_operation = self.resource_client.deployments.begin_create_or_update(
                     resource_group_name=customer_rg_name,
                     deployment_name="aro-hcp",
-                    parameters=cluster_deployment
+                    parameters=cluster_deployment,
                 )
+                cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
                 cluster_info["status"] = "Installing"
+                self.logging.info(
+                    f"[{cluster_name}] Posted cluster-create deployment (aro-hcp); "
+                    f"install_duration starts now"
+                )
 
-                # Wait for deployment to complete
-                self.logging.info(f"[{cluster_name}] Waiting for cluster deployment to complete")
                 cluster_deployment_result = cluster_deployment_operation.result()
                 self.logging.info(f"[{cluster_name}] ARO HCP cluster deployment created successfully")
 
-                # Save cluster deployment result JSON to file
-                cluster_deployment_output_file = os.path.join(cluster_info['path'], "cluster-deployment-result.json")
+                cluster_deployment_output_file = os.path.join(
+                    cluster_info['path'], "cluster-deployment-result.json"
+                )
                 try:
                     with open(cluster_deployment_output_file, 'w') as f:
                         json.dump(cluster_deployment_result.as_dict(), f, indent=2, default=str)
-                    self.logging.info(f"[{cluster_name}] Cluster deployment result saved to {cluster_deployment_output_file}")
+                    self.logging.info(
+                        f"[{cluster_name}] Cluster deployment result saved to "
+                        f"{cluster_deployment_output_file}"
+                    )
                 except Exception as save_err:
-                    self.logging.warning(f"[{cluster_name}] Failed to save cluster deployment result JSON: {save_err}")
+                    self.logging.warning(
+                        f"[{cluster_name}] Failed to save cluster deployment result JSON: {save_err}"
+                    )
 
-                # Wait for cluster provisioning state to be Succeeded or Failed (up to 30 minutes)
-                self.logging.info(f"[{cluster_name}] Waiting for cluster provisioning state to be Succeeded or Failed (max 30 minutes)")
-                provisioning_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-                wait_timeout = 30 * 60  # 30 minutes in seconds
-                check_interval = 30  # Check every 30 seconds
-                provisioning_state = None
-                cluster_ready_time = None
+                self.logging.info(
+                    f"[{cluster_name}] Waiting for cluster-create deployment to reach Succeeded "
+                    "(max 60 minutes)"
+                )
+                provisioning_state, cluster_ready_time = self._wait_for_arm_deployment(
+                    cluster_name, customer_rg_name, "aro-hcp"
+                )
 
-                while datetime.datetime.now(datetime.timezone.utc).timestamp() < provisioning_start_time + wait_timeout:
-                    if self.utils.force_terminate:
-                        self.logging.error(f"[{cluster_name}] Exiting cluster creation after capturing Ctrl-C")
-                        return 0
-
-                    try:
-                        # Get current deployment status
-                        deployment = self.resource_client.deployments.get(
-                            resource_group_name=customer_rg_name,
-                            deployment_name="aro-hcp"
-                        )
-
-                        if deployment.properties and deployment.properties.provisioning_state:
-                            provisioning_state = deployment.properties.provisioning_state
-                            self.logging.info(f"[{cluster_name}] Cluster deployment provisioning state: {provisioning_state}")
-
-                            if provisioning_state == "Succeeded":
-                                cluster_info["status"] = "ready"
-                                cluster_ready_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-                                self.logging.info(f"[{cluster_name}] Cluster deployment provisioning state is Succeeded, status updated to ready")
-                                break
-                            elif provisioning_state == "Failed":
-                                cluster_info["status"] = "Failed - Cluster Deployment"
-                                self.logging.error(f"[{cluster_name}] Cluster deployment provisioning state is Failed")
-                                self.utils.increment_counter("clusters_created_failed")
-                                return 1
-                            else:
-                                cluster_info["status"] = "Installing"
-                                elapsed_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
-                                self.logging.info(f"[{cluster_name}] Cluster deployment provisioning state is Running (elapsed: {elapsed_time}s), waiting...")
-                        else:
-                            self.logging.warning(f"[{cluster_name}] Could not determine provisioning state from deployment, waiting...")
-                            cluster_info["status"] = "Installing"
-                    except HttpResponseError as err:
-                        self.logging.warning(f"[{cluster_name}] Error checking deployment status: {err}, waiting...")
-
-                    # Wait before next check
-                    time.sleep(check_interval)
-
-                # Check if we timed out
-                if provisioning_state not in ["Succeeded", "Failed"]:
-                    elapsed_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
-                    self.logging.error(f"[{cluster_name}] Did not reach Succeeded or Failed state within 30 minutes (elapsed: {elapsed_time}s, final state: {provisioning_state})")
+                if provisioning_state == "Succeeded" and cluster_ready_time:
+                    cluster_info["status"] = "ready"
+                    self.logging.info(
+                        f"[{cluster_name}] Cluster-create deployment succeeded; "
+                        f"install_duration={cluster_ready_time - cluster_start_time}s"
+                    )
+                elif provisioning_state == "Failed":
+                    cluster_info["status"] = "Failed - Cluster Deployment"
+                    self.logging.error(f"[{cluster_name}] Cluster-create deployment failed")
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+                else:
+                    self.logging.error(
+                        f"[{cluster_name}] Cluster-create deployment did not succeed within timeout "
+                        f"(final state: {provisioning_state})"
+                    )
                     cluster_info["status"] = "Failed - Timeout"
                     self.utils.increment_counter("clusters_created_failed")
                     return 1
@@ -693,18 +840,15 @@ class Hypershift(Aro):
             self.logging.error(f"[{cluster_name}] Failed to write metadata_install.json: {err}")
             self.logging.error(f"[{cluster_name}] Attempted path: {cluster_info.get('path', 'N/A')}")
 
-        # Index to ES if available
         if self.es is not None:
-            self.logging.info(f"[{cluster_name}] ES is available, indexing cluster metadata")
             try:
                 cluster_info_copy = deepcopy(cluster_info)
-                del cluster_info_copy['cluster_start_time_on_mc']
-                del cluster_info_copy['cluster_end_time']
+                cluster_info_copy.pop('cluster_start_time_on_mc', None)
+                cluster_info_copy.pop('cluster_end_time', None)
                 self.es.index_metadata(cluster_info_copy)
-                self.logging.info(f"[{cluster_name}] Successfully indexed cluster metadata to ES")
+                self.logging.info(f"[{cluster_name}] Indexed cluster metadata to ES")
             except Exception as err:
                 self.logging.error(f"[{cluster_name}] Failed to index metadata to ES: {err}")
-            self.logging.info(f"[{cluster_name}] Indexing Management cluster stats")
             try:
                 self.utils.cluster_load(platform, cluster_name, load="index")
             except Exception as err:
@@ -749,9 +893,10 @@ class Hypershift(Aro):
             resource_id = f"/subscriptions/{self.environment.get('subscription_id')}/resourceGroups/{customer_rg_name}/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
 
             # Use the generic resource deletion API
+            api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
             delete_operation = self.resource_client.resources.begin_delete_by_id(
                 resource_id=resource_id,
-                api_version="2024-06-10-preview"
+                api_version=api_version
             )
             # Wait for deletion to complete
             delete_operation.wait()
@@ -807,6 +952,14 @@ class Hypershift(Aro):
             self.utils.increment_counter("clusters_deleted_success")
             return 0
         except HttpResponseError as err:
+            if getattr(err, "status_code", None) == 404:
+                self.logging.warning(
+                    f"[{cluster_name}] Resource group {customer_rg_name} not found; "
+                    f"treating as already deleted and continuing"
+                )
+                cluster_info["status"] = "Deleted"
+                self.utils.increment_counter("clusters_deleted_success")
+                return 0
             self.logging.error(f"[{cluster_name}] Failed to delete resource group {customer_rg_name}: {err}")
             cluster_info["status"] = "Delete Failed"
             self.utils.increment_counter("clusters_deleted_failed")
@@ -826,7 +979,7 @@ class Hypershift(Aro):
         self.logging.info(f"[{cluster_name}] Getting metadata for ARO HCP cluster")
 
         # Get cluster information from Azure REST API with retry logic
-        api_version = "2024-06-10-preview"
+        api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
         cluster_resource_id = f"/subscriptions/{subscription_id}/resourceGroups/{customer_rg_name}/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
         cluster_url = f"https://management.azure.com{cluster_resource_id}?api-version={api_version}"
 
@@ -846,6 +999,12 @@ class Hypershift(Aro):
 
                 self.logging.debug(f"[{cluster_name}] Attempting to get metadata (attempt {attempt}/{max_retries})")
                 response = requests.get(cluster_url, headers=headers)
+                if response.status_code == 404:
+                    self.logging.warning(
+                        f"[{cluster_name}] Cluster not found in Azure (404); "
+                        f"will ignore for workload/delete"
+                    )
+                    break
                 response.raise_for_status()
                 azure_cluster_data = response.json()
                 self.logging.info(f"[{cluster_name}] Successfully retrieved metadata on attempt {attempt}")
@@ -955,7 +1114,7 @@ class Hypershift(Aro):
             external_auth_name = f"{cluster_name}-auth"
 
         subscription_id = self.environment.get("subscription_id")
-        api_version = "2024-06-10-preview"
+        api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
 
         # Ensure path exists
         os.makedirs(path, exist_ok=True)
@@ -1028,7 +1187,7 @@ class Hypershift(Aro):
             client_id = ad_app_result.stdout.strip()
             self.logging.info(f"[{cluster_name}] Created AD App with Client ID: {client_id}")
 
-            # Step 3: Create AD App Secret
+            # Step 3: Create AD App Secret (with retry for Azure AD propagation delay)
             self.logging.info(f"[{cluster_name}] Step 3: Creating AD App Secret")
             ad_secret_cmd = [
                 "az", "ad", "app", "credential", "reset",
@@ -1036,14 +1195,23 @@ class Hypershift(Aro):
                 "--query", "password",
                 "--output", "tsv"
             ]
-            ad_secret_result = subprocess.run(ad_secret_cmd, capture_output=True, text=True, check=True)
-            client_secret = ad_secret_result.stdout.strip()
+            client_secret = None
+            for attempt in range(5):
+                ad_secret_result = subprocess.run(ad_secret_cmd, capture_output=True, text=True)
+                if ad_secret_result.returncode == 0:
+                    client_secret = ad_secret_result.stdout.strip()
+                    break
+                self.logging.warning(f"[{cluster_name}] AD App not yet available (attempt {attempt + 1}/5), retrying in 10s...")
+                time.sleep(10)
+            if not client_secret:
+                raise Exception(f"Failed to create AD App Secret after 5 attempts: {ad_secret_result.stderr}")
             self.logging.info(f"[{cluster_name}] AD App Secret created")
 
             # Step 4: Create External Auth Deployment
             if issuer_url:
                 self.logging.info(f"[{cluster_name}] Step 4: Creating external auth deployment")
-                external_auth_template_path = self._get_bicep_template_path("externalauth.bicep")
+                ext_auth_template = "externalauth_sw.bicep" if self.environment.get("swift", True) else "externalauth.bicep"
+                external_auth_template_path = self._get_bicep_template_path(ext_auth_template)
 
                 # Compile Bicep template
                 compiled_template_path = os.path.join(path, "externalauth.json")
@@ -1113,7 +1281,7 @@ class Hypershift(Aro):
                 self.logging.error(f"[{cluster_name}] Location header not found in admin credential response")
                 raise Exception("Failed to get kubeconfig URL from admin credential response")
 
-            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {kubeconfig_url}...")
+            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {redact_url(kubeconfig_url)}")
 
             # Step 8: Download Kubeconfig with retry (5 minutes, 30 sec interval)
             self.logging.info(f"[{cluster_name}] Step 8: Downloading kubeconfig (retry for up to 5 minutes)")
@@ -1154,7 +1322,6 @@ class Hypershift(Aro):
             if not kubeconfig_content:
                 self.logging.error(f"[{cluster_name}] Failed to download kubeconfig after 5 minutes")
                 self.logging.error(f"[{cluster_name}] Last response status: {kubeconfig_response.status_code}")
-                self.logging.error(f"[{cluster_name}] Last response: {kubeconfig_response.text[:500] if kubeconfig_response.text else 'Empty'}")
                 raise Exception("Failed to download kubeconfig after 5 minutes")
 
             # Save kubeconfig to file
@@ -1185,13 +1352,13 @@ class Hypershift(Aro):
 
         except subprocess.CalledProcessError as err:
             self.logging.error(f"[{cluster_name}] Azure CLI command failed: {err}")
-            self.logging.error(f"[{cluster_name}] stdout: {err.stdout}")
-            self.logging.error(f"[{cluster_name}] stderr: {err.stderr}")
+            self.logging.error(f"[{cluster_name}] stdout: {redact_output(err.stdout)}")
+            self.logging.error(f"[{cluster_name}] stderr: {redact_output(err.stderr)}")
             raise
         except requests.exceptions.RequestException as err:
             self.logging.error(f"[{cluster_name}] HTTP request failed: {err}")
             if hasattr(err, 'response') and err.response is not None:
-                self.logging.error(f"[{cluster_name}] Response: {err.response.text}")
+                self.logging.error(f"[{cluster_name}] Response status: {err.response.status_code}")
             raise
         except Exception as err:
             self.logging.error(f"[{cluster_name}] Unexpected error downloading kubeconfig: {err}")
@@ -1357,7 +1524,7 @@ class Hypershift(Aro):
 
     def _create_worker_nodepool(self, customer_rg_name, cluster_name, np_name, deployment_name, autoscale, replica, min_replica, max_replica, node_size, subscription_id, output_path=None, wait=False):
         """Helper function to create a single worker nodepool"""
-        template_name = "nodepool.bicep"  # Combined template handles both static and autoscale
+        template_name = "nodepool_sw.bicep" if self.environment.get("swift", True) else "nodepool.bicep"
         parameters = self._build_nodepool_parameters(
             cluster_name, np_name, autoscale, replica, min_replica, max_replica, node_size
         )
@@ -1443,7 +1610,7 @@ class Hypershift(Aro):
             self.logging.info(f"[{cluster_name}] Creating infra nodepool")
             np_name = "np-infra"
             deployment_name = "node-pool-infra"
-            template_name = "nodepool-infra.bicep"
+            template_name = "nodepool-infra_sw.bicep" if self.environment.get("swift", True) else "nodepool-infra.bicep"
             infra_size = self.environment.get("infra_size", "Standard_E8s_v3")
             # Get version info for infra nodepool - use full version (e.g., 4.20.8)
             aro_version = self.environment.get("aro_version", "4.20.8")
@@ -1802,6 +1969,7 @@ class HypershiftArguments(AroArguments):
         parser.add_argument("--azure-ad-group-name", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_AD_GROUP_NAME", default="aro-hcp-perfscale", help="Azure AD group name to grant cluster-admin access (default: aro-hcp-perfscale)")
         parser.add_argument("--issuer-url", action=EnvDefault, env=environment, envvar="HCP_BURNER_ISSUER_URL", default=None, help="OIDC issuer URL for external auth (default: https://login.microsoftonline.com/{tenant_id}/v2.0)")
         parser.add_argument("--azure-prom-token-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_PROM_TOKEN_FILE", help="Path to AZURE_PROM_TOKEN file for scraping metrics from MC (Management Cluster)")
+        parser.add_argument("--swift", action=EnvDefault, env=environment, envvar="HCP_BURNER_SWIFT", type=str, default="True", help="Enable SWIFT networking by creating a VNet integration subnet (default: True). Accepts: true/false, 1/0, yes/no")
 
         if config_file:
             config = configparser.ConfigParser()

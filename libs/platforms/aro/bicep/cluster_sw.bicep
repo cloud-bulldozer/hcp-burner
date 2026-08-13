@@ -1,4 +1,6 @@
-// Legacy combined template. hcp-burner uses cluster-prereqs.bicep + cluster_create.bicep.
+// Legacy combined template (identities + RBAC + cluster). hcp-burner uses
+// cluster-prereqs_sw.bicep + cluster_create_sw.bicep so install_duration
+// measures only the cluster-create deployment.
 @description('Name of the hypershift cluster')
 param clusterName string
 
@@ -23,6 +25,9 @@ param clusterVersion string = '4.20'
 @description('The version channel group (e.g., stable, candidate)')
 param versionChannelGroup string = 'stable'
 
+@description('VNet Integration Subnet Name for SWIFT networking')
+param vnetIntegrationSubnetName string
+
 var etcdEncryptionKeyName = 'etcd-data-kms-encryption-key'
 var randomSuffix = toLower(uniqueString(clusterName))
 
@@ -36,6 +41,11 @@ resource vnet 'Microsoft.Network/virtualNetworks@2022-07-01' existing = {
 
 resource subnet 'Microsoft.Network/virtualNetworks/subnets@2022-07-01' existing = {
   name: subnetName
+  parent: vnet
+}
+
+resource vnetIntegrationSubnet 'Microsoft.Network/virtualNetworks/subnets@2022-07-01' existing = {
+  name: vnetIntegrationSubnetName
   parent: vnet
 }
 
@@ -582,7 +592,7 @@ var operatorsAuth = {
   }
 }
 
-resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview' = {
+resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2025-12-23-preview' = {
   name: clusterName
   location: resourceGroup().location
   properties: {
@@ -606,10 +616,11 @@ resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview'
           encryptionType: 'KMS'
           kms: {
              activeKey: {
-              vaultName: keyVaultName
               name: etcdEncryptionKeyName
               version: last(split(etcdEncryptionKey.properties.keyUriWithVersion, '/'))
              }
+             vaultName: keyVaultName
+             visibility: 'Public'
           }
         }
       }
@@ -625,6 +636,7 @@ resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview'
       subnetId: subnet.id
       outboundType: 'LoadBalancer'
       networkSecurityGroupId: nsg.id
+      vnetIntegrationSubnetId: vnetIntegrationSubnet.id
       operatorsAuthentication: operatorsAuth
     }
   }

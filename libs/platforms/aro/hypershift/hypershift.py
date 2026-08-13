@@ -102,6 +102,16 @@ class Hypershift(Aro):
             return False
         return True
 
+    def _extract_deployment_output_value(self, output):
+        """Normalize ARM deployment output entries to their runtime value."""
+        if output is None:
+            return None
+        if hasattr(output, "value"):
+            return output.value
+        if isinstance(output, dict):
+            return output.get("value", output)
+        return output
+
     def _get_deployment_output_values(self, resource_group_name, deployment_name):
         """Return deployment output values keyed by output name."""
         deployment = self.resource_client.deployments.get(
@@ -111,7 +121,10 @@ class Hypershift(Aro):
         outputs = deployment.properties.outputs if deployment.properties else None
         if not outputs:
             return {}
-        return {name: output.value for name, output in outputs.items()}
+        return {
+            name: self._extract_deployment_output_value(output)
+            for name, output in outputs.items()
+        }
 
     def _wait_for_arm_deployment(self, cluster_name, customer_rg_name, deployment_name, wait_timeout=60 * 60):
         """

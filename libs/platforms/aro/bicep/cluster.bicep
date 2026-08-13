@@ -1,3 +1,4 @@
+// Legacy combined template. hcp-burner uses cluster-prereqs.bicep + cluster_create.bicep.
 @description('Name of the hypershift cluster')
 param clusterName string
 

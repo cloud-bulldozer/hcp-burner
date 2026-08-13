@@ -1,6 +1,3 @@
-// Legacy combined template (identities + RBAC + cluster). hcp-burner uses
-// cluster-prereqs_sw.bicep + cluster_create_sw.bicep so install_duration
-// measures only the cluster-create deployment.
 @description('Name of the hypershift cluster')
 param clusterName string
 
@@ -537,38 +534,6 @@ var hcpIdentity = {
   }
 }
 
-var hcpDependencies = [
-  hcpClusterApiProviderRoleSubnetAssignment
-  keyVaultCryptoUserToKeyVaultRoleAssignment
-  hcpControlPlaneOperatorVnetRoleAssignment
-  hcpControlPlaneOperatorNsgRoleAssignment
-  cloudControllerManagerRoleSubnetAssignment
-  cloudControllerManagerRoleNsgAssignment
-  ingressOperatorRoleSubnetAssignment
-  fileStorageOperatorRoleSubnetAssignment
-  fileStorageOperatorRoleNsgAssignment
-  networkOperatorRoleSubnetAssignment
-  networkOperatorRoleVnetAssignment
-  dpDiskCsiDriverMiFederatedCredentialsRoleAssignment
-  dpFileCsiDriverMiFederatedCredentialsRoleAssignment
-  dpImageRegistryMiFederatedCredentialsRoleAssignment
-  serviceManagedIdentityRoleAssignmentVnet
-  serviceManagedIdentityRoleAssignmentSubnet
-  serviceManagedIdentityRoleAssignmentNSG
-  dpFileCsiDriverFileStorageOperatorRoleSubnetAssignment
-  dpFileCsiDriverFileStorageOperatorRoleNsgAssignment
-  serviceManagedIdentityReaderOnControlPlaneMi
-  serviceManagedIdentityReaderOnCloudControllerManagerMi
-  serviceManagedIdentityReaderOnIngressMi
-  serviceManagedIdentityReaderOnDiskCsiDriverMi
-  serviceManagedIdentityReaderOnFileCsiDriverMi
-  serviceManagedIdentityReaderOnImageRegistryMi
-  serviceManagedIdentityReaderOnCloudNetworkMi
-  serviceManagedIdentityReaderOnClusterApiAzureMi
-  serviceManagedIdentityReaderOnKmsMi
-  rbacPropagationDelay
-]
-
 var operatorsAuth = {
   userAssignedIdentities: {
     controlPlaneOperators: {
@@ -592,58 +557,6 @@ var operatorsAuth = {
   }
 }
 
-resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2025-12-23-preview' = {
-  name: clusterName
-  location: resourceGroup().location
-  properties: {
-    version: {
-      id: clusterVersion
-      channelGroup: versionChannelGroup
-    }
-    dns: {}
-    network: {
-      networkType: 'OVNKubernetes'
-      podCidr: '10.128.0.0/14'
-      serviceCidr: '172.30.0.0/16'
-      machineCidr: '10.0.0.0/16'
-      hostPrefix: 23
-    }
-    console: {}
-    etcd: {
-      dataEncryption: {
-        keyManagementMode: 'CustomerManaged'
-        customerManaged: {
-          encryptionType: 'KMS'
-          kms: {
-             activeKey: {
-              name: etcdEncryptionKeyName
-              version: last(split(etcdEncryptionKey.properties.keyUriWithVersion, '/'))
-             }
-             vaultName: keyVaultName
-             visibility: 'Public'
-          }
-        }
-      }
-    }
-    api: {
-      visibility: 'Public'
-    }
-    clusterImageRegistry: {
-      state: 'Enabled'
-    }
-    platform: {
-      managedResourceGroup: managedResourceGroupName
-      subnetId: subnet.id
-      outboundType: 'LoadBalancer'
-      networkSecurityGroupId: nsg.id
-      vnetIntegrationSubnetId: vnetIntegrationSubnet.id
-      operatorsAuthentication: operatorsAuth
-    }
-  }
-  identity: hcpIdentity
-  dependsOn: hcpDependencies
-}
-
 // Delay to allow RBAC role assignments to propagate before HCP creation
 // Azure RBAC can take 1-5 minutes to fully propagate
 resource rbacPropagationDelay 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
@@ -665,3 +578,6 @@ resource rbacPropagationDelay 'Microsoft.Resources/deploymentScripts@2023-08-01'
     serviceManagedIdentityRoleAssignmentNSG
   ]
 }
+
+output operatorsAuth object = operatorsAuth
+output hcpIdentity object = hcpIdentity

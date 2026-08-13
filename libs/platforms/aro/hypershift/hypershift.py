@@ -87,6 +87,75 @@ class Hypershift(Aro):
             template_path = f"libs/platforms/aro/bicep/{template_name}"
         return template_path
 
+    def _compile_bicep_template(self, cluster_name, template_name, output_json_path):
+        """Compile a Bicep template to JSON for ARM deployment."""
+        bicep_path = self._get_bicep_template_path(template_name)
+        compile_cmd = (
+            f"az bicep build --file {shlex.quote(bicep_path)} "
+            f"--outfile {shlex.quote(output_json_path)}"
+        )
+        compile_result = subprocess.run(compile_cmd, shell=True, capture_output=True, text=True)
+        if compile_result.returncode != 0:
+            self.logging.error(
+                f"[{cluster_name}] Failed to compile {template_name}: {compile_result.stderr}"
+            )
+            return False
+        return True
+
+    def _get_deployment_output_values(self, resource_group_name, deployment_name):
+        """Return deployment output values keyed by output name."""
+        deployment = self.resource_client.deployments.get(
+            resource_group_name=resource_group_name,
+            deployment_name=deployment_name,
+        )
+        outputs = deployment.properties.outputs if deployment.properties else None
+        if not outputs:
+            return {}
+        return {name: output.value for name, output in outputs.items()}
+
+    def _wait_for_arm_deployment(self, cluster_name, customer_rg_name, deployment_name, wait_timeout=60 * 60):
+        """
+        Poll an ARM deployment until Succeeded or Failed.
+        Returns (provisioning_state, ready_timestamp) on success, or (state, None) on failure/timeout.
+        """
+        provisioning_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+        check_interval = 30
+        provisioning_state = None
+
+        while datetime.datetime.now(datetime.timezone.utc).timestamp() < provisioning_start_time + wait_timeout:
+            if self.utils.force_terminate:
+                self.logging.error(f"[{cluster_name}] Exiting after Ctrl-C while waiting for {deployment_name}")
+                return None, None
+
+            try:
+                deployment = self.resource_client.deployments.get(
+                    resource_group_name=customer_rg_name,
+                    deployment_name=deployment_name,
+                )
+                if deployment.properties and deployment.properties.provisioning_state:
+                    provisioning_state = deployment.properties.provisioning_state
+                    self.logging.info(
+                        f"[{cluster_name}] Deployment {deployment_name} state: {provisioning_state}"
+                    )
+                    if provisioning_state == "Succeeded":
+                        ready_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+                        return provisioning_state, ready_time
+                    if provisioning_state == "Failed":
+                        return provisioning_state, None
+                    elapsed = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
+                    self.logging.info(
+                        f"[{cluster_name}] Deployment {deployment_name} still running "
+                        f"(elapsed: {elapsed}s)"
+                    )
+            except HttpResponseError as err:
+                self.logging.warning(
+                    f"[{cluster_name}] Error checking deployment {deployment_name}: {err}"
+                )
+
+            time.sleep(check_interval)
+
+        return provisioning_state, None
+
     def _create_infrastructure(self, cluster_name, customer_rg_name, location, ticket_id, customer_nsg, customer_vnet_name, customer_vnet_subnet1, cluster_path, swift=True):
         """
         Create resource group and infrastructure deployment.
@@ -380,33 +449,21 @@ class Hypershift(Aro):
                 self.utils.increment_counter("clusters_created_failed")
                 return 1
 
-            # Step 4: Create ARO HCP Cluster Deployment
-            self.logging.info(f"[{cluster_name}] Step 4: Creating ARO HCP cluster deployment")
+            # Step 4: Cluster prerequisites (identities, RBAC) then cluster create only
+            self.logging.info(f"[{cluster_name}] Step 4: Deploying cluster prerequisites and cluster resource")
             swift = self.environment.get("swift", True)
             self.logging.info(f"[{cluster_name}] Swift value: {swift} (type: {type(swift).__name__})")
-            cluster_template = "cluster_sw.bicep" if swift else "cluster.bicep"
-            cluster_bicep_path = self._get_bicep_template_path(cluster_template)
+            prereqs_template = "cluster-prereqs_sw.bicep" if swift else "cluster-prereqs.bicep"
+            create_template = "cluster_create_sw.bicep" if swift else "cluster_create.bicep"
+            if swift:
+                self.logging.info(
+                    f"[{cluster_name}] SWIFT enabled, using cluster_create_sw.bicep with 2025-12-23-preview API"
+                )
 
-            # Compile cluster Bicep template
-            output_file = os.path.join(cluster_info['path'], "cluster.json")
-            compile_cmd = f"az bicep build --file {shlex.quote(cluster_bicep_path)} --outfile {shlex.quote(output_file)}"
-            compile_result = subprocess.run(compile_cmd, shell=True, capture_output=True, text=True)
-
-            if compile_result.returncode != 0:
-                self.logging.error(f"[{cluster_name}] Failed to compile cluster Bicep template: {compile_result.stderr}")
-                cluster_info["status"] = "Failed - Cluster Bicep Compilation"
-                self.utils.increment_counter("clusters_created_failed")
-                return 1
-
-            compiled_cluster_template_path = f"{cluster_info['path']}/cluster.json"
-            with open(compiled_cluster_template_path, 'r') as f:
-                cluster_template_json = json.load(f)
-
-            # Prepare parameters for cluster deployment
             aro_version = self.environment.get("aro_version", "4.20.8")
             aro_version_channel = self.environment.get("aro_version_channel", "stable")
             cluster_version = self._resolve_cluster_version(aro_version, aro_version_channel)
-            cluster_parameters = {
+            base_cluster_parameters = {
                 "vnetName": {"value": customer_vnet_name},
                 "subnetName": {"value": customer_vnet_subnet1},
                 "nsgName": {"value": customer_nsg},
@@ -414,96 +471,142 @@ class Hypershift(Aro):
                 "managedResourceGroupName": {"value": managed_resource_group},
                 "keyVaultName": {"value": key_vault_name},
                 "clusterVersion": {"value": cluster_version},
-                "versionChannelGroup": {"value": aro_version_channel}
+                "versionChannelGroup": {"value": aro_version_channel},
             }
             if swift:
-                cluster_parameters["vnetIntegrationSubnetName"] = {
+                base_cluster_parameters["vnetIntegrationSubnetName"] = {
                     "value": f"{cluster_name}-vnet-integration-subnet"
                 }
-                self.logging.info(f"[{cluster_name}] SWIFT enabled, using cluster_sw.bicep with 2025-12-23-preview API")
 
-            cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-            # Create cluster deployment
-            cluster_deployment_properties = DeploymentProperties(
+            prereqs_json_path = os.path.join(cluster_info['path'], "cluster-prereqs.json")
+            if not self._compile_bicep_template(cluster_name, prereqs_template, prereqs_json_path):
+                cluster_info["status"] = "Failed - Cluster Prereqs Bicep Compilation"
+                self.utils.increment_counter("clusters_created_failed")
+                return 1
+
+            with open(prereqs_json_path, 'r') as f:
+                prereqs_template_json = json.load(f)
+
+            prereqs_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+            prereqs_deployment_properties = DeploymentProperties(
                 mode=DeploymentMode.INCREMENTAL,
-                template=cluster_template_json,
-                parameters=cluster_parameters
+                template=prereqs_template_json,
+                parameters=base_cluster_parameters,
             )
-            cluster_deployment = Deployment(properties=cluster_deployment_properties)
+            prereqs_deployment = Deployment(properties=prereqs_deployment_properties)
+
+            cluster_ready_time = None
+            cluster_start_time = None
 
             try:
+                self.logging.info(f"[{cluster_name}] Deploying cluster prerequisites (aro-hcp-prereqs)")
+                prereqs_operation = self.resource_client.deployments.begin_create_or_update(
+                    resource_group_name=customer_rg_name,
+                    deployment_name="aro-hcp-prereqs",
+                    parameters=prereqs_deployment,
+                )
+                prereqs_operation.result()
+                prereqs_state, _ = self._wait_for_arm_deployment(
+                    cluster_name, customer_rg_name, "aro-hcp-prereqs"
+                )
+                if prereqs_state != "Succeeded":
+                    cluster_info["status"] = "Failed - Cluster Prereqs Deployment"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+
+                prereqs_outputs = self._get_deployment_output_values(customer_rg_name, "aro-hcp-prereqs")
+                operators_auth = prereqs_outputs.get("operatorsAuth")
+                hcp_identity = prereqs_outputs.get("hcpIdentity")
+                if not operators_auth or not hcp_identity:
+                    self.logging.error(
+                        f"[{cluster_name}] Missing operatorsAuth/hcpIdentity outputs from aro-hcp-prereqs"
+                    )
+                    cluster_info["status"] = "Failed - Cluster Prereqs Outputs"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+
+                cluster_info["cluster_prereqs_duration"] = (
+                    int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - prereqs_start_time
+                )
+                self.logging.info(
+                    f"[{cluster_name}] Cluster prerequisites completed in "
+                    f"{cluster_info['cluster_prereqs_duration']} seconds"
+                )
+
+                create_json_path = os.path.join(cluster_info['path'], "cluster-create.json")
+                if not self._compile_bicep_template(cluster_name, create_template, create_json_path):
+                    cluster_info["status"] = "Failed - Cluster Create Bicep Compilation"
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+
+                with open(create_json_path, 'r') as f:
+                    cluster_template_json = json.load(f)
+
+                cluster_create_parameters = dict(base_cluster_parameters)
+                cluster_create_parameters["operatorsAuth"] = {"value": operators_auth}
+                cluster_create_parameters["hcpIdentity"] = {"value": hcp_identity}
+
+                cluster_deployment_properties = DeploymentProperties(
+                    mode=DeploymentMode.INCREMENTAL,
+                    template=cluster_template_json,
+                    parameters=cluster_create_parameters,
+                )
+                cluster_deployment = Deployment(properties=cluster_deployment_properties)
+
                 cluster_deployment_operation = self.resource_client.deployments.begin_create_or_update(
                     resource_group_name=customer_rg_name,
                     deployment_name="aro-hcp",
-                    parameters=cluster_deployment
+                    parameters=cluster_deployment,
                 )
+                cluster_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
                 cluster_info["status"] = "Installing"
+                self.logging.info(
+                    f"[{cluster_name}] Posted cluster-create deployment (aro-hcp); "
+                    f"install_duration starts now"
+                )
 
-                # Wait for deployment to complete
-                self.logging.info(f"[{cluster_name}] Waiting for cluster deployment to complete")
                 cluster_deployment_result = cluster_deployment_operation.result()
                 self.logging.info(f"[{cluster_name}] ARO HCP cluster deployment created successfully")
 
-                # Save cluster deployment result JSON to file
-                cluster_deployment_output_file = os.path.join(cluster_info['path'], "cluster-deployment-result.json")
+                cluster_deployment_output_file = os.path.join(
+                    cluster_info['path'], "cluster-deployment-result.json"
+                )
                 try:
                     with open(cluster_deployment_output_file, 'w') as f:
                         json.dump(cluster_deployment_result.as_dict(), f, indent=2, default=str)
-                    self.logging.info(f"[{cluster_name}] Cluster deployment result saved to {cluster_deployment_output_file}")
+                    self.logging.info(
+                        f"[{cluster_name}] Cluster deployment result saved to "
+                        f"{cluster_deployment_output_file}"
+                    )
                 except Exception as save_err:
-                    self.logging.warning(f"[{cluster_name}] Failed to save cluster deployment result JSON: {save_err}")
+                    self.logging.warning(
+                        f"[{cluster_name}] Failed to save cluster deployment result JSON: {save_err}"
+                    )
 
-                # Wait for cluster provisioning state to be Succeeded or Failed (up to 60 minutes)
-                self.logging.info(f"[{cluster_name}] Waiting for cluster provisioning state to be Succeeded or Failed (max 60 minutes)")
-                provisioning_start_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-                wait_timeout = 60 * 60  # 60 minutes in seconds
-                check_interval = 30  # Check every 30 seconds
-                provisioning_state = None
-                cluster_ready_time = None
+                self.logging.info(
+                    f"[{cluster_name}] Waiting for cluster-create deployment to reach Succeeded "
+                    "(max 60 minutes)"
+                )
+                provisioning_state, cluster_ready_time = self._wait_for_arm_deployment(
+                    cluster_name, customer_rg_name, "aro-hcp"
+                )
 
-                while datetime.datetime.now(datetime.timezone.utc).timestamp() < provisioning_start_time + wait_timeout:
-                    if self.utils.force_terminate:
-                        self.logging.error(f"[{cluster_name}] Exiting cluster creation after capturing Ctrl-C")
-                        return 0
-
-                    try:
-                        # Get current deployment status
-                        deployment = self.resource_client.deployments.get(
-                            resource_group_name=customer_rg_name,
-                            deployment_name="aro-hcp"
-                        )
-
-                        if deployment.properties and deployment.properties.provisioning_state:
-                            provisioning_state = deployment.properties.provisioning_state
-                            self.logging.info(f"[{cluster_name}] Cluster deployment provisioning state: {provisioning_state}")
-
-                            if provisioning_state == "Succeeded":
-                                cluster_info["status"] = "ready"
-                                cluster_ready_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
-                                self.logging.info(f"[{cluster_name}] Cluster deployment provisioning state is Succeeded, status updated to ready")
-                                break
-                            elif provisioning_state == "Failed":
-                                cluster_info["status"] = "Failed - Cluster Deployment"
-                                self.logging.error(f"[{cluster_name}] Cluster deployment provisioning state is Failed")
-                                self.utils.increment_counter("clusters_created_failed")
-                                return 1
-                            else:
-                                cluster_info["status"] = "Installing"
-                                elapsed_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
-                                self.logging.info(f"[{cluster_name}] Cluster deployment provisioning state is Running (elapsed: {elapsed_time}s), waiting...")
-                        else:
-                            self.logging.warning(f"[{cluster_name}] Could not determine provisioning state from deployment, waiting...")
-                            cluster_info["status"] = "Installing"
-                    except HttpResponseError as err:
-                        self.logging.warning(f"[{cluster_name}] Error checking deployment status: {err}, waiting...")
-
-                    # Wait before next check
-                    time.sleep(check_interval)
-
-                # Check if we timed out
-                if provisioning_state not in ["Succeeded", "Failed"]:
-                    elapsed_time = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) - provisioning_start_time
-                    self.logging.error(f"[{cluster_name}] Did not reach Succeeded or Failed state within 60 minutes (elapsed: {elapsed_time}s, final state: {provisioning_state})")
+                if provisioning_state == "Succeeded" and cluster_ready_time:
+                    cluster_info["status"] = "ready"
+                    self.logging.info(
+                        f"[{cluster_name}] Cluster-create deployment succeeded; "
+                        f"install_duration={cluster_ready_time - cluster_start_time}s"
+                    )
+                elif provisioning_state == "Failed":
+                    cluster_info["status"] = "Failed - Cluster Deployment"
+                    self.logging.error(f"[{cluster_name}] Cluster-create deployment failed")
+                    self.utils.increment_counter("clusters_created_failed")
+                    return 1
+                else:
+                    self.logging.error(
+                        f"[{cluster_name}] Cluster-create deployment did not succeed within timeout "
+                        f"(final state: {provisioning_state})"
+                    )
                     cluster_info["status"] = "Failed - Timeout"
                     self.utils.increment_counter("clusters_created_failed")
                     return 1

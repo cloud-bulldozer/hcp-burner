@@ -416,12 +416,13 @@ class Utils:
         # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
         # shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        if load == "index":
+        is_index = load == "index" or (load == "" and "index" in platform.environment['load'].get('workload', ''))
+        if is_index:
             load_env["EXTRA_FLAGS"] = "--ignore-health-check"
         else:
             load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
         extra_flags = platform.environment['load'].get('extra_flags', '')
-        if extra_flags:
+        if extra_flags and not is_index:
             load_env["EXTRA_FLAGS"] = extra_flags + " " + load_env["EXTRA_FLAGS"]
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
@@ -434,7 +435,7 @@ class Utils:
             self.logging.info(f"Removing environment variables with None value: {', '.join(keys_with_none)}")
         clean_env = {key: value for key, value in load_env.items() if value is not None}
         if not self.force_terminate:
-            if load == "index":
+            if is_index:
                 self.logging.info(f"Checking cluster {cluster_name} monitoring operator stability for 2 minutes...")
 
                 for i in range(4):  # 4 checks × 30s = 2 minutes

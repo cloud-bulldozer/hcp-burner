@@ -47,6 +47,7 @@ class Hypershift(Aro):
 
     def initialize(self):
         super().initialize()
+        self._ensure_aro_hcp_cli_extension()
         # Parent class (Aro) already initializes credential and resource_client
         # Set default issuer_url using tenant_id from parent initialize
         tenant_id = self.environment.get("tenant_id")
@@ -58,6 +59,34 @@ class Hypershift(Aro):
         self.environment["swift"] = self._str_to_bool(self.environment.get("swift", "True"))
 
         self.logging.info("ARO Hypershift platform initialized")
+
+    def _ensure_aro_hcp_cli_extension(self):
+        """Ensure the Azure CLI extension that provides ``az aro hcp`` exists."""
+        extension_cmd = [
+            "az", "extension", "add",
+            "--name", "aro",
+            "--allow-preview", "true",
+            "--upgrade",
+            "--yes",
+        ]
+        extension_result = subprocess.run(
+            extension_cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        if extension_result.returncode != 0:
+            self.logging.error(
+                "Failed to install or update the Azure CLI 'aro' extension: "
+                f"{redact_output(extension_result.stderr)}"
+            )
+            raise subprocess.CalledProcessError(
+                extension_result.returncode,
+                extension_cmd,
+                output=extension_result.stdout,
+                stderr=extension_result.stderr,
+            )
+        self.logging.info("Azure CLI 'aro' extension is installed and current")
 
     def _resolve_cluster_version(self, aro_version, channel):
         """Resolve the cluster version based on the channel group.
@@ -1426,67 +1455,31 @@ class Hypershift(Aro):
             resource_id = cluster_resource_id
             self.logging.info(f"[{cluster_name}] Resource ID: {resource_id}")
 
-            # Step 7: Request Admin Credential
-            self.logging.info(f"[{cluster_name}] Step 7: Requesting admin credential")
-            admin_cred_url = f"https://management.azure.com{resource_id}/requestadmincredential?api-version={api_version}"
-
-            # Use requests with debug to capture Location header
-            admin_response = requests.post(admin_cred_url, headers=headers, allow_redirects=False)
-            admin_response.raise_for_status()
-
-            # Extract Location header
-            kubeconfig_url = admin_response.headers.get("Location")
-            if not kubeconfig_url:
-                self.logging.error(f"[{cluster_name}] Location header not found in admin credential response")
-                raise Exception("Failed to get kubeconfig URL from admin credential response")
-
-            self.logging.info(f"[{cluster_name}] Kubeconfig URL obtained: {redact_url(kubeconfig_url)}")
-
-            # Step 8: Download Kubeconfig with retry (5 minutes, 30 sec interval)
-            self.logging.info(f"[{cluster_name}] Step 8: Downloading kubeconfig (retry for up to 5 minutes)")
-            retry_timeout = 300  # 5 minutes
-            retry_interval = 30  # 30 seconds
-            retry_start = datetime.datetime.now(datetime.timezone.utc).timestamp()
-            kubeconfig_content = None
-
-            while datetime.datetime.now(datetime.timezone.utc).timestamp() < retry_start + retry_timeout:
-                elapsed = int(datetime.datetime.now(datetime.timezone.utc).timestamp() - retry_start)
-                self.logging.info(f"[{cluster_name}] Attempting kubeconfig download ({elapsed}s elapsed)...")
-
-                kubeconfig_response = requests.get(kubeconfig_url, headers=headers)
-
-                # Status 200 means success
-                if kubeconfig_response.status_code == 200:
-                    if kubeconfig_response.text:
-                        try:
-                            kubeconfig_data = kubeconfig_response.json()
-                            kubeconfig_content = kubeconfig_data.get("kubeconfig")
-                            if kubeconfig_content:
-                                self.logging.info(f"[{cluster_name}] Kubeconfig downloaded successfully")
-                                break
-                            else:
-                                self.logging.warning(f"[{cluster_name}] Response missing 'kubeconfig' key, retrying...")
-                        except json.JSONDecodeError as e:
-                            self.logging.warning(f"[{cluster_name}] Invalid JSON response: {e}, retrying...")
-                    else:
-                        self.logging.warning(f"[{cluster_name}] Empty response, retrying...")
-                # Status 202 means still processing
-                elif kubeconfig_response.status_code == 202:
-                    self.logging.info(f"[{cluster_name}] Kubeconfig not ready yet (status 202), retrying...")
-                else:
-                    self.logging.warning(f"[{cluster_name}] Kubeconfig download returned status {kubeconfig_response.status_code}, retrying...")
-
-                time.sleep(retry_interval)
-
-            if not kubeconfig_content:
-                self.logging.error(f"[{cluster_name}] Failed to download kubeconfig after 5 minutes")
-                self.logging.error(f"[{cluster_name}] Last response status: {kubeconfig_response.status_code}")
-                raise Exception("Failed to download kubeconfig after 5 minutes")
-
-            # Save kubeconfig to file
             kubeconfig_path = os.path.join(path, "kubeconfig")
-            with open(kubeconfig_path, "w") as kubeconfig_file:
-                kubeconfig_file.write(kubeconfig_content)
+
+            # Step 7: Request and download the admin kubeconfig using the
+            # documented Azure CLI command. The CLI extension owns the
+            # request body/API-version details for the current RP contract.
+            self.logging.info(f"[{cluster_name}] Step 7: Requesting admin credential")
+            request_credential_cmd = [
+                "az", "aro", "hcp", "cluster", "request-credential",
+                "--admin",
+                "--name", cluster_name,
+                "--resource-group", customer_rg_name,
+                "--subscription", subscription_id,
+                "--file", kubeconfig_path,
+                "--only-show-errors",
+            ]
+            subprocess.run(
+                request_credential_cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+            )
+
+            if not os.path.isfile(kubeconfig_path) or os.path.getsize(kubeconfig_path) == 0:
+                raise Exception(f"Azure CLI did not create a kubeconfig at {kubeconfig_path}")
 
             self.logging.info(f"[{cluster_name}] Kubeconfig downloaded successfully to {kubeconfig_path}")
 

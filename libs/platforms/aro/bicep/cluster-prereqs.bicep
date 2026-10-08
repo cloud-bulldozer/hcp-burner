@@ -86,6 +86,16 @@ resource hcpClusterApiProviderRoleSubnetAssignment 'Microsoft.Authorization/role
   }
 }
 
+resource hcpClusterApiProviderRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, clusterApiAzureMi.id, hcpClusterApiProviderRoleId, vnet.id)
+  scope: vnet
+  properties: {
+    principalId: clusterApiAzureMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: hcpClusterApiProviderRoleId
+  }
+}
+
 resource serviceManagedIdentityReaderOnClusterApiAzureMi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, serviceManagedIdentity.id, readerRoleId, clusterApiAzureMi.id)
   scope: clusterApiAzureMi
@@ -212,6 +222,16 @@ resource cloudControllerManagerRoleNsgAssignment 'Microsoft.Authorization/roleAs
   }
 }
 
+resource cloudControllerManagerRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, cloudControllerManagerMi.id, cloudControllerManagerRoleId, vnet.id)
+  scope: vnet
+  properties: {
+    principalId: cloudControllerManagerMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: cloudControllerManagerRoleId
+  }
+}
+
 resource serviceManagedIdentityReaderOnCloudControllerManagerMi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, serviceManagedIdentity.id, readerRoleId, cloudControllerManagerMi.id)
   scope: cloudControllerManagerMi
@@ -237,9 +257,25 @@ var ingressOperatorRoleId = subscriptionResourceId(
   '0336e1d3-7a87-462b-b6db-342b63f7802c'
 )
 
+// Azure Red Hat OpenShift Image Registry Operator
+var imageRegistryOperatorRoleId = subscriptionResourceId(
+  'Microsoft.Authorization/roleDefinitions',
+  '8b32b316-c2f5-4ddf-b05b-83dacd2d08b5'
+)
+
 resource ingressOperatorRoleSubnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, ingressMi.id, ingressOperatorRoleId, subnet.id)
   scope: subnet
+  properties: {
+    principalId: ingressMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: ingressOperatorRoleId
+  }
+}
+
+resource ingressOperatorRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, ingressMi.id, ingressOperatorRoleId, vnet.id)
+  scope: vnet
   properties: {
     principalId: ingressMi.properties.principalId
     principalType: 'ServicePrincipal'
@@ -311,6 +347,16 @@ resource fileStorageOperatorRoleNsgAssignment 'Microsoft.Authorization/roleAssig
   }
 }
 
+resource fileStorageOperatorRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, fileCsiDriverMi.id, fileStorageOperatorRoleId, vnet.id)
+  scope: vnet
+  properties: {
+    principalId: fileCsiDriverMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: fileStorageOperatorRoleId
+  }
+}
+
 resource serviceManagedIdentityReaderOnFileCsiDriverMi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, serviceManagedIdentity.id, readerRoleId, fileCsiDriverMi.id)
   scope: fileCsiDriverMi
@@ -328,6 +374,16 @@ resource serviceManagedIdentityReaderOnFileCsiDriverMi 'Microsoft.Authorization/
 resource imageRegistryMi 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: '${clusterName}-cp-image-registry-${randomSuffix}'
   location: resourceGroup().location
+}
+
+resource imageRegistryOperatorRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, imageRegistryMi.id, imageRegistryOperatorRoleId, vnet.id)
+  scope: vnet
+  properties: {
+    principalId: imageRegistryMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: imageRegistryOperatorRoleId
+  }
 }
 
 resource serviceManagedIdentityReaderOnImageRegistryMi 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
@@ -447,6 +503,16 @@ resource dpFileCsiDriverFileStorageOperatorRoleNsgAssignment 'Microsoft.Authoriz
   }
 }
 
+resource dpFileCsiDriverFileStorageOperatorRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, dpFileCsiDriverMi.id, fileStorageOperatorRoleId, vnet.id)
+  scope: vnet
+  properties: {
+    principalId: dpFileCsiDriverMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: fileStorageOperatorRoleId
+  }
+}
+
 resource dpImageRegistryMi 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: '${clusterName}-dp-image-registry-${randomSuffix}'
   location: resourceGroup().location
@@ -459,6 +525,16 @@ resource dpImageRegistryMiFederatedCredentialsRoleAssignment 'Microsoft.Authoriz
     principalId: serviceManagedIdentity.properties.principalId
     principalType: 'ServicePrincipal'
     roleDefinitionId: federatedCredentialsRoleId
+  }
+}
+
+resource dpImageRegistryOperatorRoleVnetAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(resourceGroup().id, dpImageRegistryMi.id, imageRegistryOperatorRoleId, vnet.id)
+  scope: vnet
+  properties: {
+    principalId: dpImageRegistryMi.properties.principalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: imageRegistryOperatorRoleId
   }
 }
 
@@ -562,6 +638,13 @@ resource rbacPropagationDelay 'Microsoft.Resources/deploymentScripts@2023-08-01'
     timeout: 'PT5M'
   }
   dependsOn: [
+    hcpClusterApiProviderRoleVnetAssignment
+    cloudControllerManagerRoleVnetAssignment
+    ingressOperatorRoleVnetAssignment
+    fileStorageOperatorRoleVnetAssignment
+    imageRegistryOperatorRoleVnetAssignment
+    dpFileCsiDriverFileStorageOperatorRoleVnetAssignment
+    dpImageRegistryOperatorRoleVnetAssignment
     dpDiskCsiDriverMiFederatedCredentialsRoleAssignment
     dpFileCsiDriverMiFederatedCredentialsRoleAssignment
     dpImageRegistryMiFederatedCredentialsRoleAssignment

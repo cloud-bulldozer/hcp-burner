@@ -158,8 +158,8 @@ class AroArguments(PlatformArguments):
         parser.add_argument("--azure-credentials-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_CREDENTIALS_FILE", help="Azure credentials file")
         parser.add_argument("--azure-region", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_REGION", default='eastus', help="Azure Region")
         parser.add_argument("--azure-mc-subscription", action=EnvDefault, env=environment, envvar="HCP_BURNER_MC_SUBSCRIPTION", help="Azure Subscription where MC Cluster is installed")
-        parser.add_argument("--aro-version", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION", default="4.20.8", help="OpenShift version in major.minor.patch format (e.g., 4.20.8). Cluster uses major.minor, nodepools use full version")
-        parser.add_argument("--aro-version-channel", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION_CHANNEL", default="stable", help="Version channel group (default: stable). Options: stable, candidate")
+        parser.add_argument("--aro-version", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION", default="4.20.8", help="OpenShift version. Use major.minor.patch for stable/fast (e.g. 4.22.8). For nightly/candidate pass the full string (e.g. 4.22.0-0.nightly-2026-08-18-014739). Cluster uses major.minor on stable/fast and the full string on nightly/candidate; nodepools always use the full version")
+        parser.add_argument("--aro-version-channel", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION_CHANNEL", default="stable", help="Version channel group (default: stable). Options: stable, fast, candidate, nightly")
 
         if config_file:
             config = configparser.ConfigParser()

@@ -13,11 +13,11 @@ param nodepoolVersion string = '4.20.8'
 @description('The version channel group (e.g., stable, candidate)')
 param versionChannelGroup string = 'stable'
 
-resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2025-12-23-preview' existing = {
+resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2026-09-01-preview' existing = {
   name: clusterName
 }
 
-resource nodepool 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters/nodePools@2025-12-23-preview' = {
+resource nodepool 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters/nodePools@2026-09-01-preview' = {
   parent: hcp
   name: nodePoolName
   location: resourceGroup().location

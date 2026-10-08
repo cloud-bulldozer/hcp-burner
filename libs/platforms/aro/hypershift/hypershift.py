@@ -296,7 +296,7 @@ class Hypershift(Aro):
             tuple: (exists: bool, is_ready: bool, cluster_info: dict or None)
         """
         try:
-            api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
+            api_version = "2026-09-01-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
             cluster_resource_id = f"/subscriptions/{subscription_id}/resourceGroups/{customer_rg_name}/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
             cluster_url = f"https://management.azure.com{cluster_resource_id}?api-version={api_version}"
 
@@ -339,6 +339,140 @@ class Hypershift(Aro):
             self.logging.warning(f"[{cluster_name}] Unexpected error checking cluster existence: {err}")
             return False, False, None
 
+    def _list_nodepools(self, cluster_name, customer_rg_name, subscription_id):
+        """
+        List nodepools for an ARO HCP cluster via Azure ARM.
+
+        Returns:
+            list[dict]: Nodepool resources (empty list if none / on error).
+        """
+        try:
+            api_version = "2026-09-01-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
+            nodepools_url = (
+                f"https://management.azure.com/subscriptions/{subscription_id}"
+                f"/resourceGroups/{customer_rg_name}"
+                f"/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
+                f"/nodePools?api-version={api_version}"
+            )
+            token = self.credential.get_token("https://management.azure.com/.default").token
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            }
+            response = requests.get(nodepools_url, headers=headers)
+            if response.status_code == 404:
+                self.logging.info(f"[{cluster_name}] No nodepools found (404)")
+                return []
+            if response.status_code != 200:
+                self.logging.warning(
+                    f"[{cluster_name}] Unexpected status {response.status_code} listing nodepools: {response.text[:300]}"
+                )
+                return []
+            items = response.json().get("value") or []
+            names = [np.get("name") for np in items if np.get("name")]
+            self.logging.info(f"[{cluster_name}] Found {len(items)} nodepool(s): {names}")
+            return items
+        except Exception as err:
+            self.logging.warning(f"[{cluster_name}] Error listing nodepools: {err}")
+            return []
+
+    def _has_worker_nodepool(self, nodepools, autoscale=False):
+        """Return True if a worker nodepool (np-static* / np-scale*) already exists."""
+        # Accept either naming scheme so prior runs with different autoscale flags still match
+        prefixes = ("np-static", "np-scale")
+        for np in nodepools or []:
+            name = (np.get("name") or "").lower()
+            if any(name == p or name.startswith(p + "-") for p in prefixes):
+                return True
+            # Also treat common alternate worker pool names as present
+            if name in ("workers", "worker", "np1", "nodepool"):
+                return True
+        return False
+
+    def _has_infra_nodepool(self, nodepools):
+        """Return True if np-infra already exists."""
+        for np in nodepools or []:
+            name = (np.get("name") or "").lower()
+            if name == "np-infra" or name.startswith("np-infra-"):
+                return True
+        return False
+
+    def _ensure_nodepools(self, platform, cluster_name, customer_rg_name):
+        """
+        Ensure worker (and optional infra) nodepools exist on a cluster.
+        Creates missing pools, then returns. Safe to call when cluster already exists.
+        """
+        cluster_info = platform.environment["clusters"][cluster_name]
+        workers = cluster_info.get("workers", 0) or 0
+        if workers <= 0:
+            self.logging.info(f"[{cluster_name}] No workers specified, skipping nodepool ensure")
+            return
+
+        subscription_id = self.environment.get("subscription_id")
+        autoscale = cluster_info.get("autoscale", False)
+        add_aro_hcp_infra = self.environment.get("add_aro_hcp_infra")
+        if add_aro_hcp_infra is None:
+            add_aro_hcp_infra = False
+
+        nodepools = self._list_nodepools(cluster_name, customer_rg_name, subscription_id)
+        has_workers = self._has_worker_nodepool(nodepools, autoscale=autoscale)
+        has_infra = self._has_infra_nodepool(nodepools)
+
+        if has_workers and (not add_aro_hcp_infra or has_infra):
+            self.logging.info(
+                f"[{cluster_name}] Required nodepools already present "
+                f"(workers={has_workers}, infra={has_infra}), skipping create"
+            )
+            return
+
+        if not has_workers:
+            self.logging.info(
+                f"[{cluster_name}] Worker nodepools missing; creating with {workers} workers"
+            )
+            replica = workers
+            node_size = cluster_info.get("node_size") or self.environment.get("node_size")
+            max_replica = cluster_info.get("max_replicas") if autoscale else None
+            min_replica = cluster_info.get("min_replicas") if autoscale else None
+            self.create_nodepool(
+                cluster_name=cluster_name,
+                replica=replica,
+                max_replica=max_replica,
+                min_replica=min_replica,
+                node_size=node_size,
+                autoscale=autoscale,
+                customer_rg_name=customer_rg_name,
+                add_aro_hcp_infra=add_aro_hcp_infra,
+            )
+            return
+
+        # Workers exist but infra is missing and requested
+        if add_aro_hcp_infra and not has_infra:
+            self.logging.info(f"[{cluster_name}] Infra nodepool missing; creating np-infra")
+            np_name = "np-infra"
+            deployment_name = "node-pool-infra"
+            template_name = "nodepool-infra_sw.bicep" if self.environment.get("swift", True) else "nodepool-infra.bicep"
+            infra_size = self.environment.get("infra_size", "Standard_E8s_v3")
+            aro_version = self.environment.get("aro_version", "4.20.8")
+            aro_version_channel = self.environment.get("aro_version_channel", "stable")
+            cluster_path = os.path.join(self.environment.get("path", "/tmp"), cluster_name)
+            parameters = {
+                "clusterName": {"value": cluster_name},
+                "nodePoolName": {"value": np_name},
+                "nodeSize": {"value": infra_size},
+                "nodepoolVersion": {"value": aro_version},
+                "versionChannelGroup": {"value": aro_version_channel},
+            }
+            self._create_nodepool_deployment(
+                cluster_name,
+                customer_rg_name,
+                deployment_name,
+                template_name,
+                parameters,
+                subscription_id,
+                wait=True,
+                output_path=cluster_path,
+            )
+
     def create_cluster(self, platform, cluster_name):
         super().create_cluster(platform, cluster_name)
         cluster_info = platform.environment["clusters"][cluster_name]
@@ -379,7 +513,16 @@ class Hypershift(Aro):
                 # Get metadata from existing cluster
                 cluster_info["metadata"] = self.get_metadata(platform, cluster_name)
 
-                # Try to download kubeconfig if not already present
+                # Ensure worker/infra nodepools exist before ext-auth + kubeconfig
+                try:
+                    self._ensure_nodepools(platform, cluster_name, customer_rg_name)
+                except Exception as np_err:
+                    self.logging.error(f"[{cluster_name}] Failed to ensure nodepools on existing cluster: {np_err}")
+                    self.logging.warning(
+                        f"[{cluster_name}] Continuing with ext-auth/kubeconfig despite nodepool ensure failure"
+                    )
+
+                # Try to download kubeconfig if not already present (includes ext-auth setup)
                 if not cluster_info.get("kubeconfig"):
                     try:
                         # Get issuer_url from environment (default already set in initialize if needed)
@@ -470,12 +613,28 @@ class Hypershift(Aro):
             create_template = "cluster_create_sw.bicep" if swift else "cluster_create.bicep"
             if swift:
                 self.logging.info(
-                    f"[{cluster_name}] SWIFT enabled, using cluster_create_sw.bicep with 2025-12-23-preview API"
+                    f"[{cluster_name}] SWIFT enabled, using cluster_create_sw.bicep with 2026-09-01-preview API"
                 )
 
             aro_version = self.environment.get("aro_version", "4.20.8")
             aro_version_channel = self.environment.get("aro_version_channel", "stable")
             cluster_version = self._resolve_cluster_version(aro_version, aro_version_channel)
+            self.logging.info(
+                f"[{cluster_name}] OCP version channel={aro_version_channel} "
+                f"cluster={cluster_version} nodepool={aro_version}"
+            )
+            if aro_version_channel == "nightly" and "nightly" not in str(aro_version):
+                self.logging.warning(
+                    f"[{cluster_name}] channel=nightly but --aro-version={aro_version} "
+                    "does not look like a nightly id (expected e.g. 4.22.0-0.nightly-YYYY-MM-DD-HHMMSS)"
+                )
+            if aro_version_channel == "candidate" and not any(
+                token in str(aro_version) for token in ("ec.", "rc.", "candidate")
+            ):
+                self.logging.warning(
+                    f"[{cluster_name}] channel=candidate but --aro-version={aro_version} "
+                    "does not look like a candidate id (expected e.g. 4.22.0-ec.3)"
+                )
             base_cluster_parameters = {
                 "vnetName": {"value": customer_vnet_name},
                 "subnetName": {"value": customer_vnet_subnet1},
@@ -893,7 +1052,7 @@ class Hypershift(Aro):
             resource_id = f"/subscriptions/{self.environment.get('subscription_id')}/resourceGroups/{customer_rg_name}/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
 
             # Use the generic resource deletion API
-            api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
+            api_version = "2026-09-01-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
             delete_operation = self.resource_client.resources.begin_delete_by_id(
                 resource_id=resource_id,
                 api_version=api_version
@@ -979,7 +1138,7 @@ class Hypershift(Aro):
         self.logging.info(f"[{cluster_name}] Getting metadata for ARO HCP cluster")
 
         # Get cluster information from Azure REST API with retry logic
-        api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
+        api_version = "2026-09-01-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
         cluster_resource_id = f"/subscriptions/{subscription_id}/resourceGroups/{customer_rg_name}/providers/Microsoft.RedHatOpenShift/hcpOpenShiftClusters/{cluster_name}"
         cluster_url = f"https://management.azure.com{cluster_resource_id}?api-version={api_version}"
 
@@ -1114,7 +1273,7 @@ class Hypershift(Aro):
             external_auth_name = f"{cluster_name}-auth"
 
         subscription_id = self.environment.get("subscription_id")
-        api_version = "2025-12-23-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
+        api_version = "2026-09-01-preview" if self.environment.get("swift", True) else "2024-06-10-preview"
 
         # Ensure path exists
         os.makedirs(path, exist_ok=True)

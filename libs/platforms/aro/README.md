@@ -22,8 +22,8 @@ This document covers the CLI arguments for deploying and managing ARO-HCP cluste
 | `--azure-region` | `HCP_BURNER_AZURE_REGION` | `eastus` | Azure region for cluster deployment |
 | `--azure-mc-subscription` | `HCP_BURNER_MC_SUBSCRIPTION` | - | Azure subscription where Management Cluster is installed |
 | `--aro-env` | `HCP_BURNER_ARO_ENV` | `production` | ARO environment |
-| `--aro-version` | `HCP_BURNER_ARO_VERSION` | `4.20.8` | OpenShift version (major.minor.patch format). Cluster uses major.minor, nodepools use full version |
-| `--aro-version-channel` | `HCP_BURNER_ARO_VERSION_CHANNEL` | `stable` | Version channel group. Options: `stable`, `candidate` |
+| `--aro-version` | `HCP_BURNER_ARO_VERSION` | `4.20.8` | OpenShift version. `major.minor.patch` for `stable`/`fast`; full string for `nightly`/`candidate` (e.g. `4.22.0-0.nightly-2026-08-18-014739`) |
+| `--aro-version-channel` | `HCP_BURNER_ARO_VERSION_CHANNEL` | `stable` | Version channel group. Options: `stable`, `fast`, `candidate`, `nightly` |
 
 ### ARO-HCP Hypershift Arguments
 
@@ -132,6 +132,25 @@ python hcp-burner.py \
   --install-clusters
 ```
 
+### Nightly / candidate builds
+
+Pass the **full** version string and set `--aro-version-channel nightly` (or `candidate`). Cluster Service requires the full id on those channels; trimming to `major.minor` only happens for `stable`/`fast`.
+
+```bash
+python hcp-burner.py \
+  --platform aro \
+  --subplatform hypershift \
+  --azure-credentials-file /path/to/azure-creds.json \
+  --azure-region westus3 \
+  --aro-version 4.22.0-0.nightly-2026-08-18-014739 \
+  --aro-version-channel nightly \
+  --cluster-name-seed mycluster \
+  --cluster-count 1 \
+  --workers 3 \
+  --add-aro-hcp-infra true \
+  --install-clusters
+```
+
 ### Cleanup Clusters
 
 ```bash
@@ -169,9 +188,10 @@ When `--add-aro-hcp-infra true` is set:
 
 ## Version Handling
 
-The `--aro-version` parameter accepts a full version (e.g., `4.20.8`):
-- **Cluster**: Uses `major.minor` (e.g., `4.20`) for `stable`/`fast` channels; full version for `nightly`/`candidate`
-- **Nodepools**: Uses full version (e.g., `4.20.8`)
+The `--aro-version` parameter is the full version id:
+- **Cluster** (`version.id`): `major.minor` (e.g. `4.22`) for `stable`/`fast`; **full string** for `nightly`/`candidate` (e.g. `4.22.0-0.nightly-2026-08-18-014739`)
+- **Nodepools** (`version.id`): always the full `--aro-version` value
+- **Channel** (`version.channelGroup`): `--aro-version-channel` (`stable`, `fast`, `candidate`, `nightly`)
 
 ## SWIFT vs Non-SWIFT Networking
 

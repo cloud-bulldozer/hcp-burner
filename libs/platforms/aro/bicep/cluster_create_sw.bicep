@@ -60,7 +60,7 @@ resource etcdEncryptionKey 'Microsoft.KeyVault/vaults/keys@2024-12-01-preview' e
   name: etcdEncryptionKeyName
 }
 
-resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2025-12-23-preview' = {
+resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2026-09-01-preview' = {
   name: clusterName
   location: resourceGroup().location
   properties: {

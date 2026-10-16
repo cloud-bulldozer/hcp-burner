@@ -364,6 +364,19 @@ class Utils:
         if 'cluster_end_time' in platform.environment['clusters'][cluster_name]:
             load_env["END_TIME"] = f"{platform.environment['clusters'][cluster_name]['cluster_end_time']}"
             del platform.environment['clusters'][cluster_name]['cluster_end_time']
+        if load == "index":
+            start_time = load_env.get("START_TIME")
+            end_time = load_env.get("END_TIME")
+            if start_time and end_time:
+                self.logging.info(
+                    f"[{cluster_name}] Indexing with START_TIME={start_time} END_TIME={end_time} "
+                    f"(window {int(end_time) - int(start_time)}s)"
+                )
+            else:
+                self.logging.warning(
+                    f"[{cluster_name}] Indexing without cluster_start_time_on_mc/cluster_end_time; "
+                    f"START_TIME={start_time} END_TIME={end_time}"
+                )
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
 
@@ -377,23 +390,40 @@ class Utils:
                     del load_env["MC_KUBECONFIG"]
         else:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
+            if load == "index" and not load_env.get("MC_KUBECONFIG"):
+                self.logging.warning(
+                    f"[{cluster_name}] MC_KUBECONFIG is empty; management-cluster metrics may not index"
+                )
 
         if not os.path.exists(my_path + '/workload'):
-            self.logging.info(f"Cloning workload repo {platform.environment['load']['repo']} on {my_path}/workload")
+            repo = platform.environment['load']['repo']
+            branch = platform.environment['load'].get('branch') or None
+            self.logging.info(
+                f"Cloning workload repo {repo}"
+                + (f" (branch {branch})" if branch else "")
+                + f" on {my_path}/workload"
+            )
             try:
-                Repo.clone_from(platform.environment['load']['repo'], my_path + '/workload')
+                clone_kwargs = {}
+                if branch:
+                    clone_kwargs["branch"] = branch
+                Repo.clone_from(repo, my_path + '/workload', **clone_kwargs)
             except Exception as err:
-                self.logging.error(f"Failed to clone repo {platform.environment['load']['repo']}")
+                self.logging.error(f"Failed to clone repo {repo}" + (f" branch {branch}" if branch else ""))
                 self.logging.error(err)
                 self.increment_counter("workloads_executed_failed")
                 return 1
         # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
         # shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        if load == "index":
-            load_env["EXTRA_FLAGS"] = "--check-health=False"
+        is_index = load == "index" or (load == "" and "index" in platform.environment['load'].get('workload', ''))
+        if is_index:
+            load_env["EXTRA_FLAGS"] = "--ignore-health-check"
         else:
             load_env["EXTRA_FLAGS"] = "--churn-duration=" + platform.environment['load']['duration'] + " --churn-percent=10 --churn-delay=30s --timeout=24h"
+        extra_flags = platform.environment['load'].get('extra_flags', '')
+        if extra_flags and not is_index:
+            load_env["EXTRA_FLAGS"] = extra_flags + " " + load_env["EXTRA_FLAGS"]
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"
@@ -405,7 +435,7 @@ class Utils:
             self.logging.info(f"Removing environment variables with None value: {', '.join(keys_with_none)}")
         clean_env = {key: value for key, value in load_env.items() if value is not None}
         if not self.force_terminate:
-            if load == "index":
+            if is_index:
                 self.logging.info(f"Checking cluster {cluster_name} monitoring operator stability for 2 minutes...")
 
                 for i in range(4):  # 4 checks × 30s = 2 minutes

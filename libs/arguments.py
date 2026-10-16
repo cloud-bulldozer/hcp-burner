@@ -25,7 +25,7 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--install-clusters", action="store_true", help="Start bringing up clusters")
 
-        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa", "azure", "aro"])
+        self.common_parser.add_argument("--platform", action=EnvDefault, env=environment, envvar="HCP_BURNER_PLATFORM", required=True, choices=["rosa", "azure", "aro", "gcp"])
         self.common_parser.add_argument("--subplatform", dest="subplatform", action=EnvDefault, env=environment, envvar="HCP_BURNER_SUBPLATFORM", help="Subplatforms of Platform")
 
         self.common_parser.add_argument("--uuid", action=EnvDefault, env=environment, envvar="HCP_BURNER_UUID")
@@ -44,7 +44,7 @@ class Arguments(argparse.ArgumentParser):
         self.common_parser.add_argument("--cluster-count", action=EnvDefault, env=environment, envvar="HCP_BURNER_CLUSTER_COUNT", type=int, default=1)
         self.common_parser.add_argument("--delay-between-batch", action=EnvDefault, env=environment, envvar="HCP_BURNER_DELAY_BETWEEN_BATCH", default=60, type=int,
                                         help="If set it will wait x seconds between each batch request")
-        self.common_parser.add_argument("--batch-size", action=EnvDefault, env=environment, envvar="HCP_BURNER_BATCH_SIZE", type=int, default=0, help="number of clusters in a batch")
+        self.common_parser.add_argument("--batch-size", action=EnvDefault, env=environment, envvar="HCP_BURNER_BATCH_SIZE", type=int, default=1, help="number of clusters in a batch")
 
         self.common_parser.add_argument("--watcher-delay", action=EnvDefault, env=environment, envvar="HCP_BURNER_WATCHER_DELAY", default=60, type=int, help="Delay between each status check")
 
@@ -52,12 +52,14 @@ class Arguments(argparse.ArgumentParser):
 
         self.common_parser.add_argument("--enable-workload", action="store_true", help="Execute workload after clusters are installed")
         self.common_parser.add_argument("--workload-repo", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_REPO", default="https://github.com/cloud-bulldozer/e2e-benchmarking.git", type=str, help="Git Repo of the workload")
+        self.common_parser.add_argument("--workload-branch", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_BRANCH", default="", type=str, help="Git branch of the workload repo (default: repo default branch)")
         self.common_parser.add_argument("--workload", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD", help="Workload to execute after clusters are installed", default="cluster-density-ms")
         self.common_parser.add_argument("--workload-script", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT", help="Workload script to execute after clusters are installed", default="run.sh")
         self.common_parser.add_argument("--workload-script-path", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_SCRIPT_PATH", help="Path to workload script", default="workloads/kube-burner-ocp-wrapper")
         self.common_parser.add_argument("--workload-executor", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXECUTOR", help="Complete path of binary used to execute the workload", default="/usr/bin/kube-burner")
         self.common_parser.add_argument("--workload-duration", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_DURATION", default="1h", type=str, help="Workload execution duration in minutes")
         self.common_parser.add_argument("--workload-jobs", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_JOBS", type=int, default=10, help="Jobs per worker.Workload will scale this number to the number of workers of the cluster")
+        self.common_parser.add_argument("--workload-extra-flags", action=EnvDefault, env=environment, envvar="HCP_BURNER_WORKLOAD_EXTRA_FLAGS", default="", type=str, help="Extra flags passed directly to the workload binary (e.g. --pods-per-node=100)")
 
         self.common_parser.add_argument("--cleanup-clusters", action="store_true", help="Delete all created clusters at the end")
         self.common_parser.add_argument("--wait-before-cleanup", action=EnvDefault, env=environment, envvar="HCP_BURNER_WAIT_BEFORE_CLEANUP", help="Minutes to wait before starting the cleanup process", default=0, type=int)

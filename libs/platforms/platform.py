@@ -63,11 +63,13 @@ class Platform:
 
         self.environment['load']["workload"] = arguments["workload"]
         self.environment['load']["repo"] = arguments["workload_repo"]
+        self.environment['load']["branch"] = arguments["workload_branch"] or ""
         self.environment['load']["script"] = arguments["workload_script"]
         self.environment['load']["script_path"] = arguments["workload_script_path"]
         self.environment['load']["executor"] = arguments["workload_executor"]
         self.environment['load']['duration'] = arguments['workload_duration']
         self.environment['load']['jobs'] = arguments['workload_jobs']
+        self.environment['load']['extra_flags'] = arguments['workload_extra_flags']
 
         if arguments["static_cluster_name"]:
             self.environment["cluster_name_seed"] = arguments["static_cluster_name"]

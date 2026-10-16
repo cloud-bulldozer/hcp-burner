@@ -7,7 +7,6 @@ import time
 import datetime
 import base64
 import configparser
-import concurrent.futures
 import subprocess
 from copy import deepcopy
 

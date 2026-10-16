@@ -5,6 +5,7 @@ import json
 import configparser
 import argparse
 import subprocess
+import os
 from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from azure.mgmt.resource import ResourceManagementClient, SubscriptionClient
 from azure.core.exceptions import HttpResponseError
@@ -87,16 +88,20 @@ class Aro(Platform):
 
         self.logging.info("Azure SDK authentication successful")
 
-        # Login to Azure CLI using service principal (required for az ad app create)
+        # Login to Azure CLI using service principal (required for az ad app create).
+        # az login does not read AZURE_CLIENT_SECRET; --password is required or it
+        # prompts interactively. Keep secret off log lines (do not log this argv).
         self.logging.info("Logging in to Azure CLI using service principal")
         try:
             az_login_cmd = [
                 "az", "login", "--service-principal",
                 "--username", azure_creds["ClientId"],
                 "--password", azure_creds["ClientSecret"],
-                "--tenant", azure_creds["tenantId"]
+                "--tenant", azure_creds["tenantId"],
             ]
-            az_login_result = subprocess.run(az_login_cmd, capture_output=True, text=True, timeout=60)
+            az_login_result = subprocess.run(
+                az_login_cmd, capture_output=True, text=True, timeout=60
+            )
 
             if az_login_result.returncode != 0:
                 self.logging.warning(f"Azure CLI login failed: {az_login_result.stderr}")
@@ -153,8 +158,8 @@ class AroArguments(PlatformArguments):
         parser.add_argument("--azure-credentials-file", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_CREDENTIALS_FILE", help="Azure credentials file")
         parser.add_argument("--azure-region", action=EnvDefault, env=environment, envvar="HCP_BURNER_AZURE_REGION", default='eastus', help="Azure Region")
         parser.add_argument("--azure-mc-subscription", action=EnvDefault, env=environment, envvar="HCP_BURNER_MC_SUBSCRIPTION", help="Azure Subscription where MC Cluster is installed")
-        parser.add_argument("--aro-version", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION", default="4.20.8", help="OpenShift version in major.minor.patch format (e.g., 4.20.8). Cluster uses major.minor, nodepools use full version")
-        parser.add_argument("--aro-version-channel", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION_CHANNEL", default="stable", help="Version channel group (default: stable). Options: stable, candidate")
+        parser.add_argument("--aro-version", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION", default="4.20.8", help="OpenShift version. Use major.minor.patch for stable/fast (e.g. 4.22.8). For nightly/candidate pass the full string (e.g. 4.22.0-0.nightly-2026-08-18-014739). Cluster uses major.minor on stable/fast and the full string on nightly/candidate; nodepools always use the full version")
+        parser.add_argument("--aro-version-channel", action=EnvDefault, env=environment, envvar="HCP_BURNER_ARO_VERSION_CHANNEL", default="stable", help="Version channel group (default: stable). Options: stable, fast, candidate, nightly")
 
         if config_file:
             config = configparser.ConfigParser()

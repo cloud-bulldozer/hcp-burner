@@ -107,6 +107,13 @@ class Utils:
     def disable_signals(self):
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 
+    def _run_limited_task(self, semaphore, target, *args):
+        """Run target and release semaphore slot at completion."""
+        try:
+            target(*args)
+        finally:
+            semaphore.release()
+
     def create_path(self, path):
         try:
             self.logging.info(f"Creating directory {path} if it does not exist")
@@ -184,6 +191,7 @@ class Utils:
         delete_cluster_thread_list = []
         for cluster_name, cluster_info in platform.environment["clusters"].items():
             self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {cluster_info['status']}")
+            thread = None
             try:
                 thread = threading.Thread(
                     target=platform.delete_cluster, args=(platform, cluster_name)
@@ -191,6 +199,9 @@ class Utils:
             except Exception as err:
                 self.logging.error("Thread creation failed")
                 self.logging.error(err)
+                cluster_info["status"] = "thread_failed"
+                self.increment_counter("clusters_deleted_failed")
+                continue
             delete_cluster_thread_list.append(thread)
             thread.start()
             cluster_info["status"] = "deleting"
@@ -304,6 +315,15 @@ class Utils:
         cluster_thread_list = []
         batch_count = 0
         loop_counter = 0
+        use_concurrency_limiter = (
+            platform.environment["batch_size"] != 0
+            and platform.environment["delay_between_batch"] is None
+        )
+        concurrency_limiter = (
+            threading.BoundedSemaphore(value=platform.environment["batch_size"])
+            if use_concurrency_limiter
+            else None
+        )
         try:
             while loop_counter < platform.environment["cluster_count"]:
                 self.logging.debug(platform.environment["clusters"])
@@ -312,11 +332,7 @@ class Utils:
                 else:
                     create_cluster = False
                     if platform.environment["batch_size"] != 0:
-                        if platform.environment["delay_between_batch"] is None:
-                            # We add 2 to the batch size. 1 for the main thread and 1 for the watcher
-                            while (platform.environment["batch_size"] + 2) <= threading.active_count():
-                                # Wait for thread count to drop before creating another
-                                time.sleep(1)
+                        if use_concurrency_limiter:
                             loop_counter += 1
                             create_cluster = True
                         elif batch_count >= platform.environment["batch_size"]:
@@ -337,17 +353,39 @@ class Utils:
                             cluster_workers = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
                         cluster_name = platform.environment["cluster_name_seed"] + "-" + str(loop_counter)
                         platform.environment["clusters"][cluster_name] = {}
+                        thread = None
+                        slot_acquired = False
                         try:
+                            if use_concurrency_limiter:
+                                while not self.force_terminate:
+                                    slot_acquired = concurrency_limiter.acquire(timeout=1)
+                                    if slot_acquired:
+                                        break
+                                if not slot_acquired:
+                                    platform.environment["clusters"][cluster_name]["status"] = "thread_failed"
+                                    self.increment_counter("clusters_created_failed")
+                                    continue
                             platform.environment["clusters"][cluster_name]["workers"] = cluster_workers
                             platform.environment["clusters"][cluster_name]["workers_wait_time"] = platform.environment["workers_wait_time"]
                             platform.environment["clusters"][cluster_name]["index"] = loop_counter - 1
-                            thread = threading.Thread(target=platform.create_cluster, args=(platform, cluster_name))
+                            thread_target = (
+                                self._run_limited_task if use_concurrency_limiter else platform.create_cluster
+                            )
+                            thread_args = (
+                                (concurrency_limiter, platform.create_cluster, platform, cluster_name)
+                                if use_concurrency_limiter
+                                else (platform, cluster_name)
+                            )
+                            thread = threading.Thread(target=thread_target, args=thread_args)
                             platform.environment["clusters"][cluster_name]["status"] = "creating"
                         except Exception as err:
                             self.logging.error(f"Failed to create cluster {cluster_name}")
                             self.logging.error(err)
                             platform.environment["clusters"][cluster_name]["status"] = "thread_failed"
                             self.increment_counter("clusters_created_failed")
+                            if slot_acquired:
+                                concurrency_limiter.release()
+                            continue
                         cluster_thread_list.append(thread)
                         thread.start()
                         self.logging.debug("Number of alive threads %d" % threading.active_count())

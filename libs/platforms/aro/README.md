@@ -22,8 +22,8 @@ This document covers the CLI arguments for deploying and managing ARO-HCP cluste
 | `--azure-region` | `HCP_BURNER_AZURE_REGION` | `eastus` | Azure region for cluster deployment |
 | `--azure-mc-subscription` | `HCP_BURNER_MC_SUBSCRIPTION` | - | Azure subscription where Management Cluster is installed |
 | `--aro-env` | `HCP_BURNER_ARO_ENV` | `production` | ARO environment |
-| `--aro-version` | `HCP_BURNER_ARO_VERSION` | `4.20.8` | OpenShift version (major.minor.patch format). Cluster uses major.minor, nodepools use full version |
-| `--aro-version-channel` | `HCP_BURNER_ARO_VERSION_CHANNEL` | `stable` | Version channel group. Options: `stable`, `candidate` |
+| `--aro-version` | `HCP_BURNER_ARO_VERSION` | `4.20.8` | OpenShift version. `major.minor.patch` for `stable`/`fast`; full string for `nightly`/`candidate` (e.g. `4.22.0-0.nightly-2026-08-18-014739`) |
+| `--aro-version-channel` | `HCP_BURNER_ARO_VERSION_CHANNEL` | `stable` | Version channel group. Options: `stable`, `fast`, `candidate`, `nightly` |
 
 ### ARO-HCP Hypershift Arguments
 
@@ -39,6 +39,7 @@ This document covers the CLI arguments for deploying and managing ARO-HCP cluste
 
 | Argument | Environment Variable | Default | Description |
 |----------|---------------------|---------|-------------|
+| `--swift` | `HCP_BURNER_SWIFT` | `True` | Enable SWIFT networking (VNet integration subnet + `2025-12-23-preview` API). Set to `false` for legacy non-SWIFT clusters |
 | `--customer-nsg` | `HCP_BURNER_CUSTOMER_NSG` | `{cluster_name}-nsg` | Customer Network Security Group name |
 | `--customer-vnet-name` | `HCP_BURNER_CUSTOMER_VNET_NAME` | `{cluster_name}-vnet` | Customer Virtual Network name |
 | `--customer-vnet-subnet1` | `HCP_BURNER_CUSTOMER_VNET_SUBNET1` | `{cluster_name}-subnet1` | Customer Virtual Network Subnet name |
@@ -131,6 +132,25 @@ python hcp-burner.py \
   --install-clusters
 ```
 
+### Nightly / candidate builds
+
+Pass the **full** version string and set `--aro-version-channel nightly` (or `candidate`). Cluster Service requires the full id on those channels; trimming to `major.minor` only happens for `stable`/`fast`.
+
+```bash
+python hcp-burner.py \
+  --platform aro \
+  --subplatform hypershift \
+  --azure-credentials-file /path/to/azure-creds.json \
+  --azure-region westus3 \
+  --aro-version 4.22.0-0.nightly-2026-08-18-014739 \
+  --aro-version-channel nightly \
+  --cluster-name-seed mycluster \
+  --cluster-count 1 \
+  --workers 3 \
+  --add-aro-hcp-infra true \
+  --install-clusters
+```
+
 ### Cleanup Clusters
 
 ```bash
@@ -168,9 +188,48 @@ When `--add-aro-hcp-infra true` is set:
 
 ## Version Handling
 
-The `--aro-version` parameter accepts a full version (e.g., `4.20.8`):
-- **Cluster**: Uses `major.minor` (e.g., `4.20`)
-- **Nodepools**: Uses full version (e.g., `4.20.8`)
+The `--aro-version` parameter is the full version id:
+- **Cluster** (`version.id`): `major.minor` (e.g. `4.22`) for `stable`/`fast`; **full string** for `nightly`/`candidate` (e.g. `4.22.0-0.nightly-2026-08-18-014739`)
+- **Nodepools** (`version.id`): always the full `--aro-version` value
+- **Channel** (`version.channelGroup`): `--aro-version-channel` (`stable`, `fast`, `candidate`, `nightly`)
+
+## SWIFT vs Non-SWIFT Networking
+
+By default, hcp-burner deploys ARO-HCP clusters with **SWIFT networking** enabled (`--swift true`).
+
+### SWIFT (default)
+
+- Creates an additional VNet integration subnet (`{cluster_name}-vnet-integration-subnet`) in `customer-infra.bicep`
+- Uses `cluster_sw.bicep`, `nodepool_sw.bicep`, `nodepool-infra_sw.bicep`, and `externalauth_sw.bicep`
+- Azure API version: `2025-12-23-preview`
+- Sets `vnetIntegrationSubnetId` on the HostedCluster platform spec
+
+### Non-SWIFT (legacy)
+
+Use this mode when working with clusters created before SWIFT support, or when the management plane does not support the `2025-12-23-preview` API.
+
+```bash
+python hcp-burner.py \
+  --platform aro \
+  --subplatform hypershift \
+  --swift false \
+  --azure-credentials-file /path/to/azure-creds.json \
+  --cluster-name-seed mycluster \
+  --install-clusters
+```
+
+Non-SWIFT behavior:
+
+- Uses `cluster.bicep`, `nodepool.bicep`, `nodepool-infra.bicep`, and `externalauth.bicep`
+- Azure API version: `2024-06-10-preview`
+- No VNet integration subnet is created
+- **Important**: Use `--swift false` for delete, metadata, and external-auth operations on existing non-SWIFT clusters. Mismatching the SWIFT flag against the cluster's actual networking mode will cause API errors.
+
+Environment variable equivalent:
+
+```bash
+export HCP_BURNER_SWIFT=false
+```
 
 ## Execution Summary
 

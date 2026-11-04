@@ -12,6 +12,7 @@ import concurrent
 
 from libs.platforms.azure.azure import Azure
 from libs.platforms.azure.azure import AzureArguments
+from libs.sanitize import redact_command
 
 
 class Hypershiftcli(Azure):
@@ -175,7 +176,7 @@ class Hypershiftcli(Azure):
                 except Exception as err:
                     self.logging.error(f"Cannot load kubeconfig for cluster {cluster_name} from {self.environment['mgmt_cluster_name']}. Waiting 5 seconds for the next try...")
                     self.logging.error(err)
-                    self.logging.debug(kubeconfig_out)
+                    self.logging.debug("Failed to parse kubeconfig secret JSON, retrying...")
                     time.sleep(5)
                     continue
                 kubeconfig_path = path + "/kubeconfig"
@@ -367,7 +368,7 @@ class Hypershiftcli(Azure):
                 self.es.index_metadata(cluster_info) if self.es is not None else None
                 return 0
             self.logging.info("Cluster Create Command:")
-            self.logging.info(cluster_cmd)
+            self.logging.info(redact_command(cluster_cmd))
             create_cluster_code, create_cluster_out, create_cluster_err = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/installation.log", {"env": myenv, 'preexec_fn': self.utils.disable_signals})
             trying += 1
             if create_cluster_code != 0:

@@ -1,3 +1,4 @@
+// Legacy combined template. hcp-burner uses cluster-prereqs.bicep + cluster_create.bicep.
 @description('Name of the hypershift cluster')
 param clusterName string
 
@@ -510,6 +511,77 @@ resource serviceManagedIdentityRoleAssignmentNSG 'Microsoft.Authorization/roleAs
   }
 }
 
+var hcpIdentity = {
+  type: 'UserAssigned'
+  userAssignedIdentities: {
+    '${serviceManagedIdentity.id}': {}
+    '${clusterApiAzureMi.id}': {}
+    '${controlPlaneMi.id}': {}
+    '${cloudControllerManagerMi.id}': {}
+    '${ingressMi.id}': {}
+    '${diskCsiDriverMi.id}': {}
+    '${fileCsiDriverMi.id}': {}
+    '${imageRegistryMi.id}': {}
+    '${cloudNetworkConfigMi.id}': {}
+    '${kmsMi.id}': {}
+  }
+}
+
+var hcpDependencies = [
+  hcpClusterApiProviderRoleSubnetAssignment
+  keyVaultCryptoUserToKeyVaultRoleAssignment
+  hcpControlPlaneOperatorVnetRoleAssignment
+  hcpControlPlaneOperatorNsgRoleAssignment
+  cloudControllerManagerRoleSubnetAssignment
+  cloudControllerManagerRoleNsgAssignment
+  ingressOperatorRoleSubnetAssignment
+  fileStorageOperatorRoleSubnetAssignment
+  fileStorageOperatorRoleNsgAssignment
+  networkOperatorRoleSubnetAssignment
+  networkOperatorRoleVnetAssignment
+  dpDiskCsiDriverMiFederatedCredentialsRoleAssignment
+  dpFileCsiDriverMiFederatedCredentialsRoleAssignment
+  dpImageRegistryMiFederatedCredentialsRoleAssignment
+  serviceManagedIdentityRoleAssignmentVnet
+  serviceManagedIdentityRoleAssignmentSubnet
+  serviceManagedIdentityRoleAssignmentNSG
+  dpFileCsiDriverFileStorageOperatorRoleSubnetAssignment
+  dpFileCsiDriverFileStorageOperatorRoleNsgAssignment
+  serviceManagedIdentityReaderOnControlPlaneMi
+  serviceManagedIdentityReaderOnCloudControllerManagerMi
+  serviceManagedIdentityReaderOnIngressMi
+  serviceManagedIdentityReaderOnDiskCsiDriverMi
+  serviceManagedIdentityReaderOnFileCsiDriverMi
+  serviceManagedIdentityReaderOnImageRegistryMi
+  serviceManagedIdentityReaderOnCloudNetworkMi
+  serviceManagedIdentityReaderOnClusterApiAzureMi
+  serviceManagedIdentityReaderOnKmsMi
+  rbacPropagationDelay
+]
+
+var operatorsAuth = {
+  userAssignedIdentities: {
+    controlPlaneOperators: {
+      'cluster-api-azure': clusterApiAzureMi.id
+      'control-plane': controlPlaneMi.id
+      'cloud-controller-manager': cloudControllerManagerMi.id
+      #disable-next-line prefer-unquoted-property-names
+      'ingress': ingressMi.id
+      'disk-csi-driver': diskCsiDriverMi.id
+      'file-csi-driver': fileCsiDriverMi.id
+      'image-registry': imageRegistryMi.id
+      'cloud-network-config': cloudNetworkConfigMi.id
+      'kms': kmsMi.id
+    }
+    dataPlaneOperators: {
+      'disk-csi-driver': dpDiskCsiDriverMi.id
+      'file-csi-driver': dpFileCsiDriverMi.id
+      'image-registry': dpImageRegistryMi.id
+    }
+    serviceManagedIdentity: serviceManagedIdentity.id
+  }
+}
+
 resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview' = {
   name: clusterName
   location: resourceGroup().location
@@ -553,76 +625,11 @@ resource hcp 'Microsoft.RedHatOpenShift/hcpOpenShiftClusters@2024-06-10-preview'
       subnetId: subnet.id
       outboundType: 'LoadBalancer'
       networkSecurityGroupId: nsg.id
-      operatorsAuthentication: {
-        userAssignedIdentities: {
-          controlPlaneOperators: {
-            'cluster-api-azure': clusterApiAzureMi.id
-            'control-plane': controlPlaneMi.id
-            'cloud-controller-manager': cloudControllerManagerMi.id
-            #disable-next-line prefer-unquoted-property-names
-            'ingress': ingressMi.id
-            'disk-csi-driver': diskCsiDriverMi.id
-            'file-csi-driver': fileCsiDriverMi.id
-            'image-registry': imageRegistryMi.id
-            'cloud-network-config': cloudNetworkConfigMi.id
-            'kms': kmsMi.id
-          }
-          dataPlaneOperators: {
-            'disk-csi-driver': dpDiskCsiDriverMi.id
-            'file-csi-driver': dpFileCsiDriverMi.id
-            'image-registry': dpImageRegistryMi.id
-          }
-          serviceManagedIdentity: serviceManagedIdentity.id
-        }
-      }
+      operatorsAuthentication: operatorsAuth
     }
   }
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${serviceManagedIdentity.id}': {}
-      '${clusterApiAzureMi.id}': {}
-      '${controlPlaneMi.id}': {}
-      '${cloudControllerManagerMi.id}': {}
-      '${ingressMi.id}': {}
-      '${diskCsiDriverMi.id}': {}
-      '${fileCsiDriverMi.id}': {}
-      '${imageRegistryMi.id}': {}
-      '${cloudNetworkConfigMi.id}': {}
-      '${kmsMi.id}': {}
-    }
-  }
-  dependsOn: [
-    hcpClusterApiProviderRoleSubnetAssignment
-    keyVaultCryptoUserToKeyVaultRoleAssignment
-    hcpControlPlaneOperatorVnetRoleAssignment
-    hcpControlPlaneOperatorNsgRoleAssignment
-    cloudControllerManagerRoleSubnetAssignment
-    cloudControllerManagerRoleNsgAssignment
-    ingressOperatorRoleSubnetAssignment
-    fileStorageOperatorRoleSubnetAssignment
-    fileStorageOperatorRoleNsgAssignment
-    networkOperatorRoleSubnetAssignment
-    networkOperatorRoleVnetAssignment
-    dpDiskCsiDriverMiFederatedCredentialsRoleAssignment
-    dpFileCsiDriverMiFederatedCredentialsRoleAssignment
-    dpImageRegistryMiFederatedCredentialsRoleAssignment
-    serviceManagedIdentityRoleAssignmentVnet
-    serviceManagedIdentityRoleAssignmentSubnet
-    serviceManagedIdentityRoleAssignmentNSG
-    dpFileCsiDriverFileStorageOperatorRoleSubnetAssignment
-    dpFileCsiDriverFileStorageOperatorRoleNsgAssignment
-    serviceManagedIdentityReaderOnControlPlaneMi
-    serviceManagedIdentityReaderOnCloudControllerManagerMi
-    serviceManagedIdentityReaderOnIngressMi
-    serviceManagedIdentityReaderOnDiskCsiDriverMi
-    serviceManagedIdentityReaderOnFileCsiDriverMi
-    serviceManagedIdentityReaderOnImageRegistryMi
-    serviceManagedIdentityReaderOnCloudNetworkMi
-    serviceManagedIdentityReaderOnClusterApiAzureMi
-    serviceManagedIdentityReaderOnKmsMi
-    rbacPropagationDelay
-  ]
+  identity: hcpIdentity
+  dependsOn: hcpDependencies
 }
 
 // Delay to allow RBAC role assignments to propagate before HCP creation

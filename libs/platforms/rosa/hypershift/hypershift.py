@@ -14,6 +14,7 @@ from copy import deepcopy
 
 from libs.platforms.rosa.rosa import Rosa
 from libs.platforms.rosa.rosa import RosaArguments
+from libs.sanitize import redact_command
 
 
 class Hypershift(Rosa):
@@ -474,7 +475,7 @@ class Hypershift(Rosa):
                 self.logging.error(f"Exiting cluster creation for {cluster_name} after capturing Ctrl-C")
                 return 0
             self.logging.info("Cluster Create Command:")
-            self.logging.info(cluster_cmd)
+            self.logging.info(redact_command(cluster_cmd))
             (create_cluster_code, create_cluster_out, create_cluster_err) = self.utils.subprocess_exec(" ".join(str(x) for x in cluster_cmd), cluster_info["path"] + "/rosa-create.log", {'preexec_fn': self.utils.disable_signals})
             trying += 1
             if create_cluster_code != 0:

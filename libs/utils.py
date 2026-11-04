@@ -11,6 +11,7 @@ import subprocess
 import threading
 from datetime import datetime, timedelta
 from git import Repo
+from libs.sanitize import redact_command, redact_metadata, redact_output
 
 
 class Utils:
@@ -93,7 +94,9 @@ class Utils:
         failed_clusters = []
         for cluster_name, cluster_info in platform.environment.get("clusters", {}).items():
             status = cluster_info.get("status", "unknown")
-            if "Failed" in status or status in ("thread_failed", "metadata_not_found", "Delete Failed"):
+            if "Failed" in status or status in (
+                "thread_failed", "metadata_not_found", "metadata_unavailable", "Delete Failed"
+            ):
                 failed_clusters.append((cluster_name, status))
 
         if failed_clusters:
@@ -150,7 +153,8 @@ class Utils:
 
         Function call example: exit_code, out, err = common._subprocess_exec("ls -l", extra_params={'cwd': '/tmp', 'universal_newlines': False})
         """
-        self.logging.debug(command)
+        safe_command = redact_command(command)
+        self.logging.debug(safe_command)
         stdout = None
         stderr = None
         try:
@@ -161,19 +165,19 @@ class Utils:
                 process = subprocess.Popen(command.split(), stdout=log_file, stderr=log_file, **extra_params)
             stdout, stderr = process.communicate()
             if process.returncode != 0 and log_output:
-                self.logging.error(f"Failed to execute command: {command}")
-                self.logging.error(stdout if stdout else "")
-                self.logging.error(stderr if stderr else "")
+                self.logging.error(f"Failed to execute command: {safe_command}")
+                self.logging.error(redact_output(stdout if stdout else ""))
+                self.logging.error(redact_output(stderr if stderr else ""))
                 if output_file:
                     with open(output_file, "r") as log_read:
                         content = log_read.read()
-                        self.logging.error(content)
+                        self.logging.error(redact_output(content))
             return process.returncode, stdout, stderr
         except Exception as err:
-            self.logging.error(f"Error executing command: {command}")
+            self.logging.error(f"Error executing command: {safe_command}")
             self.logging.error(str(err))
-            self.logging.error(stdout if stdout else "")
-            self.logging.error(stderr if stderr else "")
+            self.logging.error(redact_output(stdout if stdout else ""))
+            self.logging.error(redact_output(stderr if stderr else ""))
             return -1, None, None
 
     def cleanup_scheduler(self, platform):
@@ -182,8 +186,18 @@ class Utils:
             time.sleep(platform.environment["wait_before_cleanup"] * 60)
         self.logging.info(f"Attempting to start cleanup process of {len(platform.environment['clusters'])} clusters waiting {platform.environment['delay_between_cleanup']} seconds between each deletion")
         delete_cluster_thread_list = []
+        # metadata_unavailable: keep for cleanup (transient get_metadata failure).
+        # metadata_not_found: confirmed Azure 404 — nothing to delete.
+        skip_statuses = ("metadata_not_found", "Not Created", "thread_failed")
         for cluster_name, cluster_info in platform.environment["clusters"].items():
-            self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {cluster_info['status']}")
+            status = cluster_info.get("status")
+            if status in skip_statuses or status is None:
+                self.logging.warning(
+                    f"[{cluster_name}] Skipping delete; cluster not found or not eligible "
+                    f"(status: {status})"
+                )
+                continue
+            self.logging.info(f"Attempting to start cleanup process of {cluster_name} on status: {status}")
             try:
                 thread = threading.Thread(
                     target=platform.delete_cluster, args=(platform, cluster_name)
@@ -191,6 +205,7 @@ class Utils:
             except Exception as err:
                 self.logging.error("Thread creation failed")
                 self.logging.error(err)
+                continue
             delete_cluster_thread_list.append(thread)
             thread.start()
             cluster_info["status"] = "deleting"
@@ -204,8 +219,7 @@ class Utils:
                 time.sleep(platform.environment["delay_between_cleanup"])
         return delete_cluster_thread_list
 
-    # To form the cluster_info dict for cleanup funtions
-    # It will be called only when --cleanup-clusters without --install-clusters
+    # To form the cluster_info dict for cleanup/workload when --install-clusters is not used
     def get_cluster_info(self, platform):
         loop_counter = 0
         while loop_counter < platform.environment["cluster_count"]:
@@ -214,42 +228,58 @@ class Utils:
             platform.environment["clusters"][cluster_name] = {}
             platform.environment["clusters"][cluster_name]["metadata"] = platform.get_metadata(platform, cluster_name)
 
-            # Check if metadata retrieval failed (status not found or metadata_not_found)
+            # Confirmed missing (404): drop. Transient metadata failures: keep for cleanup,
+            # but status stays off the workload-eligible set (ready/installed/Completed/Succeeded).
             metadata_status = platform.environment["clusters"][cluster_name]["metadata"].get("status")
             if metadata_status is None or metadata_status == "metadata_not_found":
-                self.logging.warning(f"[{cluster_name}] Metadata not found after all retries, skipping this cluster")
-                platform.environment["clusters"][cluster_name]["status"] = "metadata_not_found"
+                self.logging.warning(
+                    f"[{cluster_name}] Cluster not found; ignoring for workload/delete and continuing"
+                )
+                platform.environment["clusters"].pop(cluster_name, None)
                 continue
 
             platform.environment["clusters"][cluster_name]["status"] = metadata_status
             platform.environment["clusters"][cluster_name]["path"] = platform.environment["path"] + "/" + cluster_name
             platform.environment["clusters"][cluster_name]["kubeconfig"] = platform.environment["clusters"][cluster_name]["path"] + "/kubeconfig"
             platform.environment['clusters'][cluster_name]['workers'] = int(platform.environment["workers"].split(",")[(loop_counter - 1) % len(platform.environment["workers"].split(","))])
+            if metadata_status == "metadata_unavailable":
+                self.logging.warning(
+                    f"[{cluster_name}] Metadata unavailable after retries; "
+                    f"keeping cluster for cleanup, skipping workload scheduling"
+                )
         return platform
 
     def validate_azure_prom_token(self, platform, phase="workload"):
-        """Validate and load AZURE_PROM_TOKEN from file or environment variable."""
+        """Load AZURE_PROM_TOKEN from file or environment variable.
+
+        The token is always re-read from disk when azure_prom_token_file is set so a
+        refreshed file is picked up before each kube-burner spawn. Updating the file
+        after kube-burner has already started does not affect that process.
+        """
         if platform.environment.get("platform") != "aro":
             return True
 
         azure_prom_token_path = platform.environment.get("azure_prom_token_file", "")
 
-        # Option 1: Token file provided
+        # Option 1: Token file provided — always re-read (Azure AD tokens expire ~1h)
         if azure_prom_token_path and os.path.exists(azure_prom_token_path):
             file_age = datetime.now() - datetime.fromtimestamp(os.path.getmtime(azure_prom_token_path))
             if file_age > timedelta(hours=1):
-                self.logging.warning(f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age})")
-                try:
-                    if input(f"[{phase}] Update token file and confirm (yes/no): ").strip().lower() not in ['yes', 'y']:
-                        self.azure_prom_token = None
-                        return False
-                except (EOFError, KeyboardInterrupt):
-                    self.azure_prom_token = None
-                    return False
+                self.logging.error(
+                    f"[{phase}] AZURE_PROM_TOKEN file older than 1 hour (age: {file_age}); "
+                    f"continuing with file contents — refresh {azure_prom_token_path} to avoid Prometheus 401"
+                )
             try:
                 with open(azure_prom_token_path, 'r') as f:
                     self.azure_prom_token = f.read().strip()
-                self.logging.info(f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path}")
+                if not self.azure_prom_token:
+                    self.logging.error(f"[{phase}] AZURE_PROM_TOKEN file is empty: {azure_prom_token_path}")
+                    self.azure_prom_token = None
+                    return False
+                self.logging.info(
+                    f"[{phase}] Loaded AZURE_PROM_TOKEN from {azure_prom_token_path} "
+                    f"(mtime age: {file_age})"
+                )
                 return True
             except Exception as err:
                 self.logging.error(f"[{phase}] Failed to read token file: {err}")
@@ -275,7 +305,7 @@ class Utils:
             self.validate_azure_prom_token(platform, phase="workload")
 
         for cluster_name, cluster_info in platform.environment["clusters"].items():
-            self.logging.debug(cluster_info)
+            self.logging.debug(redact_metadata(cluster_info))
             if cluster_info['status'] in ("ready", "installed", "Completed", "Succeeded"):
                 self.logging.info(f"Attempting to start load process on {cluster_name}")
                 try:
@@ -380,14 +410,21 @@ class Utils:
         my_path = platform.environment['clusters'][cluster_name]['path']
         load_env["KUBECONFIG"] = platform.environment.get('clusters', {}).get(cluster_name, {}).get('kubeconfig', "")
 
-        # Use pre-validated AZURE_PROM_TOKEN for ARO platform (validated once in load_scheduler)
+        # ARO: re-read token from file right before each kube-burner spawn (workload or index).
+        # Azure Monitor tokens expire ~1h; a value cached at load_scheduler/install start goes stale.
+        # Updating the file after this process is running still will not refresh an in-flight kube-burner.
         if platform.environment.get("platform") == "aro":
+            phase = f"{cluster_name}/{load or 'workload'}"
+            self.validate_azure_prom_token(platform, phase=phase)
             if self.azure_prom_token:
                 load_env["AZURE_PROM_TOKEN"] = self.azure_prom_token
             else:
                 # No valid token available, remove MC_KUBECONFIG if present
                 if "MC_KUBECONFIG" in load_env:
                     del load_env["MC_KUBECONFIG"]
+                self.logging.error(
+                    f"[{cluster_name}] AZURE_PROM_TOKEN missing/empty; Azure Prometheus scrape will 401"
+                )
         else:
             load_env["MC_KUBECONFIG"] = platform.environment.get("mc_kubeconfig", "")
             if load == "index" and not load_env.get("MC_KUBECONFIG"):
@@ -416,7 +453,8 @@ class Utils:
         # Copy executor to the local folder because we saw in the past that we cannot use kube-burner with multiple executions at the same time
         # shutil.copy2(platform.environment['load']['executor'], my_path)
         load_env["ITERATIONS"] = str(platform.environment['clusters'][cluster_name]['workers'] * platform.environment['load']['jobs'])
-        is_index = load == "index" or (load == "" and "index" in platform.environment['load'].get('workload', ''))
+        effective_workload = load if load != "" else platform.environment['load']['workload']
+        is_index = effective_workload == "index" or "index" in str(effective_workload)
         if is_index:
             load_env["EXTRA_FLAGS"] = "--ignore-health-check"
         else:
@@ -427,7 +465,7 @@ class Utils:
         # if es_url is not None:
         #     load_env["ES_SERVER"] = es_url
         load_env["LOG_LEVEL"] = "debug"
-        load_env["WORKLOAD"] = load if load != "" else platform.environment['load']['workload']
+        load_env["WORKLOAD"] = effective_workload
         log_file = load if load != "" else platform.environment['load']['workload']
         load_env["KUBE_DIR"] = my_path
         keys_with_none = [key for key, value in load_env.items() if value is None]
@@ -454,9 +492,13 @@ class Utils:
                 self.logging.info(f"Cluster {cluster_name} monitoring stable for 2 minutes. Proceeding with workload.")
 
             else:
-                self.logging.info(f"Checking cluster {cluster_name} health using oc adm wait-for-stable-cluster...")
-
-                health_cmd = "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+                self.logging.info(
+                    f"Checking cluster {cluster_name} health using "
+                    f"oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+                )
+                health_cmd = (
+                    "oc adm wait-for-stable-cluster --minimum-stable-period=15s --timeout=20m"
+                )
 
                 health_code, health_out, health_err = self.subprocess_exec(
                     health_cmd,

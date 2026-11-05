@@ -12,7 +12,7 @@ on:
       HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER:
         required: true
       HCP_BURNER_ES_URL:
-        required: true
+        required: false
 jobs:
   test-rosa:
     runs-on: ubuntu-latest
@@ -51,7 +51,7 @@ jobs:
         HCP_BURNER_OCM_TOKEN: ${{ secrets.HCP_BURNER_OCM_TOKEN }}
         HCP_BURNER_AWS_ACCOUNT_FILE: "/tmp/aws_config.ini"
         HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER: ${{ secrets.HCP_BURNER_HYPERSHIFT_SERVICE_CLUSTER}}
-        HCP_BURNER_ES_URL: ${{ secrets.HCP_BURNER_ES_URL}}
+        HCP_BURNER_ES_URL: ${{ secrets.HCP_BURNER_ES_URL || '' }}
         HCP_BURNER_ES_INDEX: "hcp-burner"
 
     # - name: Install bats
